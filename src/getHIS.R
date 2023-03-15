@@ -75,8 +75,8 @@ inventoryDataStore <- function(park, max = 1000, path = "data/HIS/"){
     dplyr::mutate(resourceId = resID,
                   referenceName = refName,
                   UNIT_CODE = str_sub(title,-4,-1)) %>%
-    filter(!is.na(referenceName)) #%>%
-    .[40:300,]
+    filter(!is.na(referenceName)) %>%
+    .[140:nrow(.),]
   
   for(i in 1:nrow(final_df)){
     

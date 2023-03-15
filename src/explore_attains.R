@@ -22,6 +22,11 @@ water_types <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer 
 
 meta <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_meta")
 
+# How frequently does a single catchment (i.e. nhdplusid) have more than one assessment unit in it? How are they represented?
+mult_aus <- catchments %>%
+  group_by(nhdplusid) %>%
+  summarize(n = n_distinct(assessmentunitidentifier))
+  
 
 
 
