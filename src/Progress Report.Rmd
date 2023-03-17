@@ -1,0 +1,180 @@
+---
+title: "Progress Report"
+author: "Katie Willi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(sf)
+library(mapview)
+library(jsonlite)
+library(rvest)
+library(RODBC)
+
+```
+
+This report aims to update NPCA on the current progress we have made towards analyzing state water quality assessment data for waterbodies within National Park units. To perform this assessment, we have downloaded data from two key sources outlined below.
+
+1)  [**The EPA's ATTAINS database**](https://www.epa.gov/waterdata/get-data-access-public-attains-data#AttainsGeo)**.** This geospatial database represents up-to-date state water quality status assessment data for all waterbodies of the US. With this data source, we can investigate the following:
+
+-   Assessment status (i.e., impaired, good, unknown)
+-   Impairments, if any
+-   Waterbody uses (the state-designated uses for each waterbody assessed, grouped into nationally consistent categories by the EPA)
+
+*Resolution of data:* The EPA uses an [automated process](https://www.epa.gov/sites/default/files/2016-04/documents/final_geopilot_report_2016-03-21.pdf) that casts state-submitted geospatial information - whose resolutions vary drastically - into NHDPlus V2 catchments.
+
+*Frequency of updates:* This database is updated semi-regularly (the most recent update occurred in August, 2022).
+
+**Map 1:** Example of ATTAINS data at Zion National Park. Data is aggregated/cast to the resolution of NHD Plus V2, which are displayed as polygons on the map. Click each catchment for a list of impairments (if any exist).
+
+```{r}
+all_catch <- readRDS('data/us_catchments.RDS')
+
+ZION <- getParkUnits() %>%
+  filter(UNIT_CODE == "ZION") %>%
+  st_transform(3857)
+
+ZION_line <- sf::st_cast(ZION,"MULTILINESTRING")
+
+SHEN <- getParkUnits() %>%
+  filter(UNIT_CODE == "SHEN") %>%
+  st_transform(3857)
+
+SHEN_line <- sf::st_cast(SHEN,"MULTILINESTRING")
+
+water_types <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_water_types")
+
+assmnt_parms <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_assmnt_parms")
+
+ZION_catchments <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_catchments") %>%
+  .[ZION,] #%>%
+  #merge(select(water_types, assessmentunitidentifier, state, watertype, watersize, units), by = "assessmentunitidentifier", all.x = TRUE)
+
+combined_ZION <- ZION_catchments %>%
+  select(nhdplusid, assessmentunitidentifier, ircategory, overallstatus, reportingcycle) %>%
+  sp::merge(., filter(select(assmnt_parms, assessmentunitidentifier, parameterstatus, parametername, parametergroupname), parameterstatus == "Cause"), by = "assessmentunitidentifier", all.x = TRUE) %>%
+  group_by(nhdplusid) %>%
+  mutate(impairments = paste(unique(parametername), collapse = "; ")) %>%
+  select(assessmentunitidentifier, nhdplusid, overallstatus, impairments)
+
+SHEN_catchments <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_catchments") %>%
+  .[SHEN,] #%>%
+  #merge(select(water_types, assessmentunitidentifier, state, watertype, watersize, units), by = "assessmentunitidentifier", all.x = TRUE)
+
+combined_SHEN <- SHEN_catchments %>%
+  select(nhdplusid, assessmentunitidentifier, ircategory, overallstatus, reportingcycle) %>%
+  sp::merge(., filter(select(assmnt_parms, assessmentunitidentifier, parameterstatus, parametername, parametergroupname), parameterstatus == "Cause"), by = "assessmentunitidentifier", all.x = TRUE) %>%
+  group_by(nhdplusid) %>%
+  mutate(impairments = paste(unique(parametername), collapse = "; ")) %>%
+  select(assessmentunitidentifier, nhdplusid, overallstatus, impairments)
+
+
+mapview(combined_ZION, 
+        zcol = "overallstatus") +
+  mapview(ZION_line, 
+        color = "black", 
+        alpha.regions = 0, 
+        lwd = 2, 
+        popup = FALSE, 
+        legend = F, 
+        homebutton = FALSE,
+        label = FALSE)
+```
+
+```{r}
+unassessed <- all_catch %>%
+  st_transform(3857) %>%
+  .[SHEN,] #%>%
+  filter(!FEATUREID %in% combined_SHEN$nhdplusid)
+
+mapview(combined_SHEN, 
+        zcol = "overallstatus") +
+  mapview(SHEN_line, 
+        color = "black", 
+        alpha.regions = 0, 
+        lwd = 2, 
+        popup = FALSE, 
+        legend = F, 
+        homebutton = FALSE,
+        label = FALSE)
+```
+
+
+2)  [**NPS's Hydrographic and Impairment Statistics (HIS) database**](https://www.nps.gov/subjects/protectingwater/his.htm)**.** This geospatial database represents NPS waters that are considered impaired by state water quality assessments. That is, this database does not include any information about waterbodies that are considered good or unknown. However, the HIS database *does* identify waters that added antidegradation standards (e.g., Outstanding National Resource Waters).
+
+*Resolution of data:* Unlike ATTAINS, NPS casts state water quality information to the High Resolution NHD.
+
+*Frequency of updates:* HIS is produced manually, and thus is time intensive and updated less regularly than ATTAINS (for example, the most recent update to Zion National Park's HIS data was in 2017).
+
+**Map 2:** Example of HIS antidegradation standard data at Zion National Park. Data is aggregated/cast to the High Resolution NHD, displayed as flowlines on the map.
+
+```{r}
+# db <- "ZION_HIS.mdb"
+# con2 <- RODBC::odbcConnectAccess2007(db)
+# RODBC::sqlTables(con2, tableType = "TABLE")$TABLE_NAME
+
+tbl303d <- read_csv('tbl303d.csv')
+
+tblORW <- read_csv('tblORW.csv')
+
+ET_Park <- read_csv('ET_Park.csv') %>%
+  left_join(tbl303d, by = c("Entity_ID" = "STATE_LIST_ID")) %>%
+  left_join(tblORW, by = "ORW_ID") %>%
+  mutate(reachcode = as.character(ReachCode))
+
+# UT_ORW <- RODBC::sqlFetch(con2, "UT_ORW") %>%
+#   write_csv('UT_ORW.csv')
+
+nhd <- rgdal::readOGR("nhdhr_zion.shp") %>%
+  sf::st_as_sf(.) %>%
+  sp::merge(., ET_Park, by = "reachcode") %>%
+  group_by(reachcode) %>%
+  mutate(impairments = paste(unique(PARENT_IMP_DESC), collapse = "; ")) %>%
+  select(Entity_ID, reachcode, Designation_Name)
+  
+mapview::mapview(nhd, zcol = "Designation_Name") +
+    mapview(ZION_line, 
+        color = "black",
+        alpha.regions = 0, 
+        lwd = 2, 
+        popup = FALSE, 
+        legend = F, 
+        homebutton = FALSE,
+        label = FALSE)
+```
+
+### Example analyses at Zion
+
+```{r}
+pie <- catchments %>%
+  distinct(nhdplusid, .keep_all = TRUE) %>%
+  group_by(ircategory) %>%
+  summarize(count=n()) %>%
+  ungroup()
+  #mutate(method_status=ifelse(is.na(method_status), "Ambiguous Colorimetry", method_status))
+pie <- pie %>% mutate(ircategory = factor(x = ircategory, levels = ircategory)) %>% 
+  mutate(prop = count/sum(pie$count)) %>%  
+  mutate(ypos = cumsum(prop)- 0.5*prop) %>%
+  mutate(legend = paste0(ircategory, " (", scales::percent(prop), ")"))
+
+ggplot(data=pie, aes(x="", y=count, fill=legend)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  scale_fill_manual(values=c("#009E73","#E69F00","#56B4E9","#CC79A7","#0072B2","#F0E442","#D55E00")) +
+  guides(fill=guide_legend(title="IR Statuses by Catchment")) +
+  theme_void() + # remove background, grid, numeric label
+  theme(text = element_text(size = 20))
+```
+
+```{r}
+impair <- catchments %>%
+  select(nhdplusid, assessmentunitidentifier, ircategory, overallstatus, reportingcycle) %>%
+  sp::merge(., filter(select(assmnt_parms, assessmentunitidentifier, parameterstatus, parametername, parametergroupname), parameterstatus == "Cause"), by = "assessmentunitidentifier", all.x = TRUE)
+
+ggplot(impair) +
+  geom_
+```
