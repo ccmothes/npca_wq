@@ -13,6 +13,7 @@ library(mapview)
 library(jsonlite)
 library(rvest)
 library(RODBC)
+library(nngeo)
 
 map(list.files(path="src/",
                pattern="*.R",
@@ -23,100 +24,157 @@ map(list.files(path="src/",
 
 ```{r}
 # Choose projection
-projection <- 3857
+projection <- 3857 # ATTAINS projection
 
 # Download Park Boundaries:
 parks <- getParkUnits() %>%
-  st_transform(projection)
+  st_transform(projection) %>%
+  select(UNIT_CODE)
 
-# Pulling in a shapefile of all NHDPlus V2 flow meta-data and shapefile of catchments (pre-downloaded, still need to add that in upstream):
+sf::st_crs(parks)
+
+# Pulling in a csv of all NHDPlus V2 flow meta-data and a shape-
+# file of catchments (pre-downloaded, still need to add that in upstream):
 nhd <- read_csv('data/nhd_flow_network.csv') 
-
-nhdplus_contus_catchments <- readRDS('data/us_catchments.RDS')
-
-nhdplus_contus_catchments %>%
-  sf::st_transform(projection) %>%
-  sf::st_join(parks, left = FALSE) %>%
-  saveRDS('data/npca_new/naked_catchments.RDS')
-
-naked_all_catchments <- readRDS('data/npca_new/naked_catchments.RDS')
 
 # Pulling in raw ATTAINS data:
 attains_layers <- sf::st_layers(dsn = 'data/ATTAINS_Assessment_20220809.gpkg')
 
-attains_areas <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_areas")
+attains_areas <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg',
+                             layer = "attains_au_areas")
 
-attains_lines <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_lines")
+attains_lines <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+                             layer = "attains_au_lines")
 
-attains_points <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_points")
+attains_points <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+                              layer = "attains_au_points")
 
-attains_catchments <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_catchments")
+attains_catchments <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+                                  layer = "attains_au_catchments")
 
-attains_attributes <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_attributes")
-
-attains_control <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_control")
-
-attains_catchassmnt <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_catchassmnt")
-
-attains_assmnt_parms <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_assmnt_parms")
-
-attains_water_types <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_water_types")
-
-attains_meta <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_meta")
-
-# link ATTAINS data to park boundaries:
-nps_attains_inside <- attains_catchments %>%
- dplyr::filter(nhdplusid %in% naked_all_catchments$FEATUREID) %>%
- sf::st_join(parks, left = FALSE)
-
-saveRDS(nps_attains_inside, 'data/prep/nps_attains_inside.RDS')
-
-# catchments in park boundaries but with no ATTAINS data linked to them
-# aka UNASSESSED:
-nps_unassessed_inside <- naked_all_catchments %>%
-  select(comid = FEATUREID,
-         UNIT_NAME) %>%
-  # only keep catchments that aren't listed in ATTAINS
-  filter(!comid %in% nps_attains_inside$nhdplusid) %>%
-  saveRDS('data/nps_unassessed_inside.RDS')
-unassessed_inside <- readRDS('data/nps_unassessed_inside.RDS')
-
-inside <- bind_rows(nps_attains_inside, nps_unassessed_inside)
-```
-
-```{r}
-
-empty_list <- vector("list", length = nrow(naked_all_catchments))
+# attains_attributes <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+#                                   layer = "attains_au_attributes")
+# 
+# attains_control <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+#                                layer = "attains_au_control")
+# 
+# attains_catchassmnt <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+#                                    layer = "attains_au_catchassmnt")
+# 
+# attains_assmnt_parms <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+#                                     layer = "attains_au_assmnt_parms")
+# 
+# attains_water_types <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+#                                    layer = "attains_au_water_types")
+# 
+# attains_meta <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', 
+#                             layer = "attains_au_meta")
 
 
-empty_list <- st_covered_by(naked_all_catchments[i], parks, sparse = TRUE) 
+# find all ATTAINS area features within parks:
+nps_attains_areas <- attains_areas %>%
+  sf::st_join(parks, left = FALSE)
+# get area (in square meters) of full AU:
+nps_attains_areas$au_area <- sf::st_area(nps_attains_areas, by_element = TRUE)
+# clip ATTAINS areas at park boundary:
+nps_attains_areas <- sf::st_intersection(nps_attains_areas, parks)
+# get area (in square meters) of AU within park boundary:
+nps_attains_areas$in_park_area <- sf::st_area(nps_attains_areas, by_element = TRUE)
+saveRDS(nps_attains_areas, 'data/nps_attains_areas.RDS')
+sf::st_write(dplyr::select(nps_attains_areas, UNIT_CODE), 'data/nps_attains_areas.shp', append=FALSE)
 
+# find all ATTAINS line features within parks:
+nps_attains_lines <- attains_lines %>%
+  sf::st_join(parks, left = FALSE)
+# get length (in meters) of full AU:
+nps_attains_lines$au_length <- sf::st_length(nps_attains_lines, by_element = TRUE)
+# clip ATTAINS lines at park boundary:
+nps_attains_lines <- sf::st_intersection(nps_attains_lines, parks)
+# get length (in meters) of AU within park boundary:
+nps_attains_lines$in_park_length <- sf::st_length(nps_attains_lines, by_element = TRUE)
+saveRDS(nps_attains_lines, 'data/nps_attains_lines.RDS')
+sf::st_write(dplyr::select(nps_attains_lines, UNIT_CODE), 'data/nps_attains_lines.shp', append=FALSE)
 
-wholly_within <- st_covered_by(naked_all_catchments, parks, sparse = TRUE) %>%
-    lapply(function(x) ifelse(is_empty(x), NA, x)) %>% 
-    unlist() %>%
-  as_tibble() 
+# find all ATTAINS point features within parks:
+nps_attains_points <- attains_points %>%
+  sf::st_join(parks, left = FALSE)
+saveRDS(nps_attains_points, 'data/nps_attains_points.RDS')
+sf::st_write(dplyr::select(nps_attains_points, UNIT_CODE), 'data/nps_attains_points.shp', append=FALSE)
 
-naked_all_catchments_more <- cbind(naked_all_catchments, wholly_within) %>%
-  rename(wholly_within = value)
+# find all ATTAINS catchment features (the aggregation of all three geospatial types) within parks:
+nps_attains_catchments <- attains_catchments %>%
+  sf::st_join(parks, left = FALSE)
+# get area (in square meters) of full AU:
+nps_attains_catchments$au_area <- sf::st_area(nps_attains_catchments, by_element = TRUE)
+# clip ATTAINS catchments at park boundary:
+nps_attains_catchments <- sf::st_intersection(nps_attains_catchments, parks)
+# get area (in square meters) of AU within park boundary:
+nps_attains_catchments$in_park_area <- sf::st_area(nps_attains_catchments, by_element = TRUE)
+saveRDS(nps_attains_catchments, 'data/nps_attains_catchments.RDS')
+sf::st_write(select(nps_attains_catchments, UNIT_CODE), 'data/nps_attains_catchments.shp', append=FALSE)
 
-naked_crossover_catchments <- naked_all_catchments_more %>%
-  filter(is.na(wholly_within)) %>%
-  # catchment shapefile created from a `clip` of park boundaries (i.e. were clipped
-  # and not contained within the park boundary, they must cross over):
-  #dplyr::filter(FEATUREID %in% readRDS('data/npca_new/from_app/nps_outside.RDS')$comid) %>%
-  # only want their IDs
-  dplyr::select(comid = FEATUREID) %>%
-  distinct(.)
+# Locate catchments within the NHD that are not captured by ATTAINS
+nhdplus_contus_catchments <- readRDS('data/nhdplusv2_catchments.RDS')
+sf::st_crs(nhdplus_contus_catchments)
+nps_all_catchments <- nhdplus_contus_catchments %>%
+  sf::st_transform(projection) %>%
+  sf::st_join(parks, left = FALSE) %>%
+  sp::merge(st_drop_geometry(attains_catchments), by.x ="FEATUREID", by.y = "nhdplusid", all.x = TRUE) %>%
+  dplyr::mutate(data_type = ifelse(is.na(submissionid), "NO ATTAINS DATA", "ATTAINS DATA"))
+ # get area (in square meters) of full AU:
+nps_all_catchments$au_area <- sf::st_area(nps_all_catchments, by_element = TRUE)
+# clip unassessed catchments at park boundary:
+nps_all_catchments <- sf::st_intersection(nps_all_catchments, parks)
+# get area (in square meters) of AU within park boundary:
+nps_all_catchments$in_park_area <- sf::st_area(nps_all_catchments, by_element = TRUE)
+saveRDS(nps_all_catchments, 'data/nps_all_catchments.RDS')
+sf::st_write(select(nps_all_catchments, UNIT_CODE), 'data/nps_all_catchments.shp', append=FALSE)
+
+# #bind all catchments
+# nps_all_catchments <- bind_rows(nps_attains_catchments, nps_unassessed_catchments)
+# saveRDS(nps_all_catchments, 'data/nps_all_catchments.RDS')
+# sf::st_write(select(nps_all_catchments, UNIT_CODE), 'data/nps_all_catchments.shp', append=FALSE)
+
+#find catchment along the perimeter of parks
+not_wholly_within <- nps_all_catchments %>%
+  dplyr::mutate(area_dif = as.numeric(100*(in_park_area/au_area))) %>%
+  dplyr::filter(area_dif <= 99)
+saveRDS(not_wholly_within, 'data/not_wholly_within.RDS')
+sf::st_write(select(not_wholly_within, UNIT_CODE), 'data/not_wholly_within.shp', append=FALSE)
+
+# Discern between catchments wholly within park boundary, and catchments
+# that cross over boundary:
+# wholly_within <- st_covered_by(nps_all_catchments, parks, sparse = TRUE) %>%
+#   lapply(function(x) ifelse(is_empty(x), NA, x)) %>% 
+#   unlist() %>%
+#   as_tibble() 
+# ... tack this info onto our catchment shapefile:
+# naked_all_catchments_more <- cbind(naked_all_catchments, wholly_within) %>%
+#   rename(wholly_within = value)
+# saveRDS(naked_all_catchments_more, 'data/nps_inside_with_meta.RDS')
+# st_write(naked_all_catchments_more, 'data/nps_inside_with_meta.shp', append=FALSE)
+
+# naked_crossover_catchments <- naked_all_catchments_more %>%
+#   filter(is.na(wholly_within)) %>%
+#   # catchment shapefile created from a `clip` of park boundaries (i.e. were clipped
+#   # and not contained within the park boundary, they must cross over):
+#   #dplyr::filter(FEATUREID %in% readRDS('data/npca_new/from_app/nps_outside.RDS')$comid) %>%
+#   # only want their IDs
+#   dplyr::select(comid = FEATUREID) %>%
+#   distinct(.)
+# st_write(naked_crossover_catchments, 'data/naked_crossover_catchments.shp', append=FALSE)
 
 getWatersheds <- function(boundary_flowlines){
-  dat<- as_tibble(nhdplusTools::get_UM(nhd, boundary_flowlines)) %>%
-  write_csv(dat, paste0('data/npca_new/watershed_wip/', boundary_flowlines, '.csv'))
+  dat <- as_tibble(nhdplusTools::get_UM(nhd, boundary_flowlines))
+    write_csv(dat, paste0('data/npca_new/watershed_wip/', boundary_flowlines, '.csv'))
 }
 
-boundary_flowlines <- naked_crossover_catchments$comid
+boundary_flowlines <- not_wholly_within %>%
+  dplyr::filter(FEATUREID > 0) %>%
+  dplyr::select(comid=FEATUREID)
 
-comids <- map(boundary_flowlines[1:length(boundary_flowlines)], try(getWatersheds))
+comids <- possibly(
+  map(boundary_flowlines[1:length(boundary_flowlines)], getWatersheds), otherwise = 1+1, quiet = TRUE)
 
 comids <- plyr::ldply(list.files(path = 'data/npca_new/watershed_wip/', full.names = TRUE), read_csv)
 
@@ -135,6 +193,9 @@ nhdplus_contus_catchments <- readRDS('data/npca_new/us_catchments.RDS')
 # the fast way (when you have all catchments already downloaded)
 all_getUM_catchments <- nhdplus_contus_catchments %>%
   filter(FEATUREID %in% comid_merge$value)
+
+saveRDS(all_getUM_catchments, )
+st_write(all_getUM_catchments, 'data/um_catchments.shp')
 ```
 
 
