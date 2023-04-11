@@ -1,0 +1,180 @@
+---
+title: "CSU-NPCA Progress Report"
+author: "Katie Willi"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE, reults = 'hide'}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, error = FALSE, message = FALSE)
+
+library(tidyverse)
+library(sf)
+library(mapview)
+library(jsonlite)
+library(rvest)
+library(RODBC)
+
+try(plyr::ldply(list.files(path="src/",
+                       pattern="*.R",
+                       full.names=TRUE),
+            source))
+```
+
+## Task 1 Progress
+
+This report aims to update NPCA on the current progress we have made towards analyzing state water quality assessment data for waterbodies within NPS units. To perform this assessment, we have downloaded data from two key sources outlined below. Additionally, we have started to develop a supplementary [online data portal](https://katie-r-willi-personal.shinyapps.io/npca_wq_shiny/) for viewing this information across the NPS System. Please note, it is still in an alpha stage.
+
+### [**EPA ATTAINS database**](https://www.epa.gov/waterdata/get-data-access-public-attains-data#AttainsGeo)
+
+This geospatial database represents state water quality assessment data for all waterbodies of the US. With this data source, we can investigate the following:
+
+-   Assessment status (i.e., impaired, good, unknown, unassessed);
+-   Impairments, if any; and
+-   Waterbody uses (the state-designated uses for each waterbody assessed, grouped into nationally consistent categories by the EPA). We can also determine which designated uses are not being supported (i.e., "impaired").
+
+*Resolution of data:* The EPA uses an [automated process](https://www.epa.gov/sites/default/files/2016-04/documents/final_geopilot_report_2016-03-21.pdf) that casts state-submitted geospatial information - whose resolutions vary drastically - into NHDPlus V2 catchments (we can think of these catchments as small sub-watersheds). This relationship between assessment units and catchments is "many-to-many", where one assessment unit can have more than one catchment, and/or one catchment can contain multiple assessment units. Inversely, some catchments might have no assessment units if no waterbodies in a catchment have been assessed in their state's water quality integrated reporting.
+
+*Frequency of updates:* This database is updated semi-regularly, typically when new state data is made available (the most recent update occurred in August, 2022).
+
+<br>
+
+```{r, results = 'hide', include = FALSE}
+ZION <- getParkUnits() %>%
+  filter(UNIT_CODE == "ZION") %>%
+  st_transform(3857)
+
+ZION_line <- sf::st_cast(ZION,"MULTILINESTRING")
+
+water_types <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_water_types") %>%
+  select(assessmentunitidentifier, watertype, watersize, units)
+
+catchments <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_catchments") %>%
+  .[ZION,] %>%
+  sp::merge(water_types, by = "assessmentunitidentifier", all.x = TRUE)
+
+#catch_count <- distinct(catchments, nhdplusid)
+
+assmnt_parms <- sf::st_read(dsn = 'data/ATTAINS_Assessment_20220809.gpkg', layer = "attains_au_assmnt_parms")
+
+combined <- catchments %>%
+  select(nhdplusid, assessmentunitidentifier, ircategory, overallstatus, 
+         reportingcycle, watertype, watersize, units) %>%
+  sp::merge(., filter(select(assmnt_parms, 
+                             assessmentunitidentifier, parameterstatus, parametername, parametergroupname),
+                      parameterstatus == "Cause"), by = "assessmentunitidentifier", all.x = TRUE) %>%
+  group_by(nhdplusid) %>%
+  mutate(impairments = 
+           paste(unique(parametername), collapse = "; ")) %>%
+  select(assessmentunitidentifier, nhdplusid, overallstatus, impairments) %>%
+  mutate(overallstatus = case_when(overallstatus == "Fully Supporting" ~ "Good",
+                                   overallstatus == "Not Supporting" ~ "Impaired",
+                                   overallstatus == "Not Assessed" ~ "Not Assessed"))
+
+rm(water_types, assmnt_parms, catchments, ZION)
+```
+
+```{r}
+mapview(combined, 
+        zcol = "overallstatus",
+        col.regions = c("#059FA4", "#DC851E", "#A1A522"),
+        layer.name = "WQ Status",
+        alpha.regions = 0.9) +
+  mapview(ZION_line, 
+        color = "black", 
+        alpha.regions = 0, 
+        lwd = 2, 
+        popup = FALSE, 
+        legend = F, 
+        homebutton = FALSE,
+        label = FALSE)
+```
+
+**Map 1:** Example of ATTAINS data at Zion National Park. Assessment data is aggregated/cast to the resolution of NHDPlus V2 catchments. Click each catchment for a list of its associated impairments.
+
+```{r, results = 'hide', include = FALSE}
+gc()
+```
+
+<br>
+
+### [**NPS Hydrographic and Impairment Statistics (HIS) database**](https://www.nps.gov/subjects/protectingwater/his.htm)
+
+This geospatial database represents NPS waters that are considered impaired by their state water quality assessments. That is, this database ***does not*** include any information about waterbodies that are considered to have good or unknown water quality. However, the HIS database ***does*** identify waters with [special antidegradation standards](https://www.epa.gov/wqs-tech/key-concepts-module-4-antidegradation) (e.g., Outstanding National Resource Waters).
+
+*Resolution of data:* Unlike ATTAINS, NPS casts state water quality information to the High Resolution NHD, which is a more precise representation of state water quality data. This is different than the approach that the EPA takes, which is much coarser.
+
+*Frequency of updates:* The HIS database is developed manually, and thus is time intensive and updated less regularly than ATTAINS (for example, the most recent update to Zion National Park's HIS data was in 2017).
+
+<br>
+
+```{r, results = 'hide'}
+# db <- "ZION_HIS.mdb"
+# con2 <- RODBC::odbcConnectAccess2007(db)
+# RODBC::sqlTables(con2, tableType = "TABLE")$TABLE_NAME
+
+#tbl303d <- read_csv('data/data_for_report1/tbl303d.csv')
+
+tblORW <- read_csv('data/data_for_report1/tblORW.csv')
+
+ET_Park <- read_csv('data/data_for_report1/ET_Park.csv') %>%
+  #left_join(tbl303d, by = c("Entity_ID" = "STATE_LIST_ID")) %>%
+  left_join(tblORW, by = "ORW_ID") %>%
+  mutate(reachcode = as.character(ReachCode))
+
+# UT_ORW <- RODBC::sqlFetch(con2, "UT_ORW") %>%
+#   write_csv('data/data_for_report1/UT_ORW.csv')
+
+nhd <- rgdal::readOGR("data/data_for_report1/nhdhr_zion.shp") %>%
+  sf::st_as_sf(.) %>%
+  sp::merge(., ET_Park, by = "reachcode") %>%
+  #group_by(reachcode) %>%
+  #mutate(impairments = paste(unique(PARENT_IMP_DESC), collapse = "; ")) %>%
+  select(Waterbody, reachcode, Designation_Name, Entire_Extent_of_ORW) %>%
+  mutate(Designation_Name = ifelse(is.na(Designation_Name), "None", "Additional antidegradation protections"))
+```
+
+```{r, fig.cap = "Map 2: Example of HIS antidegradation data at Zion National Park. State antidegradation information is cast to High Resolution NHD waterbody features. Here this data is overlaid with NHDPlus V2 catchments for comparison."}
+mapview::mapview(nhd,
+                 color = c("#059FA4", "#C2CAD7"),
+                 zcol = "Designation_Name",
+                 layer.name = "Antidegradation Protection") +
+    mapview(ZION_line, 
+        color = "black",
+        alpha.regions = 0, 
+        lwd = 2, 
+        popup = FALSE, 
+        legend = F, 
+        homebutton = FALSE,
+        label = FALSE) +
+  mapview(combined, 
+        col.regions = "black",
+        popup = FALSE, 
+        legend = F, 
+        homebutton = FALSE,
+        label = FALSE,
+        alpha.regions = 0)
+
+rm(tblORW, ET_Park)
+```
+
+**Map 2:** Example of HIS antidegradation data at Zion National Park. State antidegradation information is cast to High Resolution NHD waterbody features. Here this data is overlaid with NHDPlus V2 catchments for comparison.
+
+<br>
+
+```{r, results = 'hide'}
+gc()
+```
+
+## Next steps
+
+There are several key differences between the Wild and Scenic River assessment and what's possible for our NPS System assessment using ATTAINS and HIS.
+
+The Wild and Scenic River assessment cast state water quality information to the NHD High Resolution database, similar to the HIS database. Though this is the most precise portrayal of state water quality data, to recreate this level of detail for the entire NPS System would take considerable time and resources, and is therefore beyond the current scope of this project.
+
+Using ATTAINS and the HIS database, we are still able to get meaningful data about waters within the NPS System - as well as waters outside the NPS System - without any additional data collection steps. For example, we can identify what percentage of catchments within the NPS System have waterbodies with good, impaired, and unknown water quality; the types of impairments experienced in impaired catchments; and the fraction of NPS catchments with waterbodies that have special antidegradation protections.
+
+CSU will need to verify that this assessment approach meets the needs of NPCA. If this approach is appropriate, we will begin writing a report of our findings, similar in content to the WSR report. Moreover, we are currently supplementing this report with an additional deliverable in the form of an interactive web portal. Since this is outside the scope of work, the functionality we can provide is limited but may still be relevant to NPCA's needs.

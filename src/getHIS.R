@@ -9,41 +9,41 @@
 #' @param path If `save = TRUE`, the file path to save to
 #' 
 #' @return A single dataframe of metadata for each park
-inventoryDataStore <- function(park, max = 1000, path = "data/HIS/"){
+getHIS <- function(max = 1000, path = "data/HIS/"){
   
   #set base URL
   call <- "https://irmaservices.nps.gov/datastore/v4/rest"
   
-  #Search all park info
+  # Search for "Hydrographic" to get all HIS datasets
   dat <- httr::GET(paste0(call, "/QuickSearch?q=", "Hydrographic", "&top=", max)) 
   
-  #convert content to text
+  # convert content to text
   dat_text <- httr::content(dat, "text", encoding = "UTF-8")
   
-  #parse data in JSON
+  # parse data in JSON
   dat_json <- jsonlite::fromJSON(dat_text, flatten = TRUE)
   
-  #convert items to data.frame
+  # convert items to data.frame
   dat_df <- dplyr::as_tibble(dat_json$items)
   
-  #filter out dockets and geospatial datasets
+  # ID geospatial HIS databases to download
   dat_df_clean <- dat_df %>% 
     dplyr::filter(referenceType %in% c("Geospatial Dataset"),
                   grepl("Hydrographic and Impairment Statistic", title, ignore.case = TRUE)) %>% 
     dplyr::select(-newestVersion)
   
-  #create empty vector to fill in resourceID
-  resID <- vector("character", length = nrow(dat_df_clean))
+  # create empty vector to fill in downloadLink and name of download file
+  dlLink <- vector("character", length = nrow(dat_df_clean))
   refName <- vector("character", length = nrow(dat_df_clean))
   
-  #now get resourceID (dataset download ID) for each item
+  #now get downloadLink (dataset download ID) for each item
   for (j in 1:nrow(dat_df_clean)){
     
     refID <- as.character(dat_df_clean[j, "referenceId"])
     
     res <- httr::GET(paste0(call, "/Reference/", refID, "/DigitalFiles"))
     
-    #extract resourceID
+    #extract downloadLink
     resContent1 <- httr::content(res)[[1]]
     try(resContent2 <- httr::content(res)[[2]])
     
@@ -58,34 +58,32 @@ inventoryDataStore <- function(park, max = 1000, path = "data/HIS/"){
       
     }
     
-    # if no file, no resourceID so assign NA
+    # if no file, no downloadLink so assign NA
     if(length(resContent) == 0){
       
-      resID[j] <- NA
+      dlLink[j] <- NA
       
     } else {
       
-      resID[j] <- resContent$downloadLink
+      dlLink[j] <- resContent$downloadLink
       refName[j] <- resContent$fileName
       
     }
   }
   
   final_df <- dat_df_clean %>% 
-    dplyr::mutate(resourceId = resID,
+    dplyr::mutate(downloadLink = dlLink,
                   referenceName = refName,
                   UNIT_CODE = str_sub(title,-4,-1)) %>%
-    filter(!is.na(referenceName)) %>%
-    .[140:nrow(.),]
+    filter(!is.na(referenceName))
   
   for(i in 1:nrow(final_df)){
     
     df <- final_df[i,]
-    #temp1 <- tempfile()
-    download.file(df$resourceId, destfile = paste0("data/HIS/", df$referenceName), method = 'curl')#paste0(path, df$UNIT_CODE, "_HIS.mdb"), method = "curl")
-    # try(unzip(temp1, exdir = 'data/HIS/'))
-    # try(download.file(df$resourceId, destfile = paste0("data/HIS/", df$UNIT_CODE,"_HIS.mdb")))
-    # unlink(temp1)
+    
+    # download the
+    download.file(df$downloadLink, destfile = paste0(path, df$referenceName), method = 'curl')
+
     print(paste0(df[,11], " finished!"))
     
   }  
