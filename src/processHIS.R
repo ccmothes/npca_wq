@@ -5,6 +5,4 @@ list.files(path = path, pattern = "*.zip") %>%
  
 length(list.files(path = path, pattern = "*.mdb"))
 
-
-
 }
