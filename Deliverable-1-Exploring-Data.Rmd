@@ -13,23 +13,40 @@ library(ggspatial)
 library(ggpubr)
 library(scales)
 library(mapview)
+library(tigris)
+library(USA.state.boundaries)
+library(nngeo)
 
 
 load("data/alldata.RData")
-map(list.files('1-src/', full.names = TRUE), source)
+map(list.files('src/', full.names = TRUE), source)
 
 npca <- getNPCA()
-
+no_water_parks <- read_csv("data/no_water.csv")
 parks <- getParkUnits() %>%
-  st_join(npca)
+  st_join(npca) %>%
+merge(., no_water_parks, by.x = "UNIT_NAME", by.y = "Park", all.x = TRUE) %>%
+  # Some official park names have changed since the last HIS update (e.g. from "Site" to "Park", capitalization differences, etc. 
+  # Here I am manually capturing the parks without hydrogrphy features that the merge didn't capture:
+mutate(Hydrography = ifelse(UNIT_NAME %in% c("Brown v. Board of Education National Historical Park", "Carter G. Woodson Home National Historic Site",
+                                             "Harry S Truman National Historic Site", "Lewis and Clark National Historic Trail", 
+                                             "Longfellow House-Washington's Headquarters National Historic Site", 
+                                             "Martin Luther King, Jr., National Historical Park", "Martin Luther King, Jr., Memorial", 
+                                             "Thomas Edison National Historical Park", "White House"), "None", Hydrography))
 
-michigan <- USAboundaries::us_states() %>% filter(name %in% c("Hawaii", "Michigan")) %>%
+# Ugly state delineation:  
+full_usa <- tigris::states()
+
+# making the USA "pretty":
+prettier <- USA.state.boundaries::state_boundaries_wgs84 %>% filter(NAME %in% c("Hawaii", "Michigan") & TYPE == "Land") %>%
   st_transform(3857)
-usa <- tigris::states() %>% filter(!NAME %in% c("Michigan", "Hawaii")) %>%
+usa <- tigris::states(resolution = "20m") %>% filter(!NAME %in% c("Michigan", "Hawaii")) %>%
   st_transform(3857) %>%
-  bind_rows(michigan)
+  bind_rows(prettier)
+rm(prettier)
 
-state_mapper <- full_usa %>%
+# For figures:
+state_mapper <- usa %>%
   usa_mapper()
   
 parks_mapper <- parks %>%
@@ -38,6 +55,13 @@ parks_mapper <- parks %>%
   distinct(UNIT_CODE, .keep_all = TRUE) %>%
   usa_mapper()
 
+# Incorporate new-found info about parks without water in them, while
+# preserving the original dataset
+original_dataset_park <- final_dataset_park
+final_dataset_park <- original_dataset_park %>%
+  dplyr::left_join(as_tibble(select(parks, UNIT_CODE, Hydrography), by = "UNIT_CODE")) #%>%
+  # remove parks that don't have waterbodies in them, e.g., the White House
+  # filter(is.na(Hydrography))
 ```
 
 Providing an example of the different assessment unit types in ATTAINS:
@@ -107,9 +131,9 @@ zion_area <- nps_attains_areas %>% filter(UNIT_CODE == "ZION") %>% group_by(asse
 shen_lines <- nps_attains_lines %>% filter(UNIT_CODE == "SHEN") %>% group_by(assessmentunitidentifier) %>% summarize()
 cong_points <- nps_attains_points %>% filter(UNIT_CODE == "CONG") %>% summarize(assessmentunitidentifier)
 
-olym_area <- nps_attains_areas %>% filter(UNIT_CODE %in% c("OLYM")) %>% group_by(assessmentunitidentifier) %>% summarize() %>% nngeo::st_remove_holes()
-olym_lines <- nps_attains_lines %>% filter(UNIT_CODE %in% c("OLYM")) %>% group_by(assessmentunitidentifier) %>% summarize()
-olym_points <- nps_attains_points %>% filter(UNIT_CODE %in% c("OLYM"))
+romo_area <- nps_attains_areas %>% filter(UNIT_CODE %in% c("ROMO")) %>% group_by(assessmentunitidentifier) %>% summarize() %>% nngeo::st_remove_holes()
+romo_lines <- nps_attains_lines %>% filter(UNIT_CODE %in% c("ROMO")) %>% group_by(assessmentunitidentifier) %>% summarize()
+romo_points <- nps_attains_points %>% filter(UNIT_CODE %in% c("ROMO"))
 
 line <- ggplot()+
   geom_sf(data = filter(parks, UNIT_CODE == "SHEN"), color = "grey", size = 3, alpha = 0.3) +
@@ -117,7 +141,8 @@ line <- ggplot()+
   scale_color_manual(values=cols) +
   guides(fill = FALSE, color = FALSE, size = FALSE) +
   ggspatial::annotation_scale(location = "br", width_hint = 0.5) +
-  theme_void()
+  theme_void() #+
+  #coord_sf(xlim = c(-8767735.715105632, -8752565.094900327), ylim = c(4610175.742603601, 4624269.106648318))
 
 area <- ggplot()+
   geom_sf(data = filter(parks, UNIT_CODE == "ZION"), color = "grey", size = 3, alpha = 0.3) +
@@ -134,21 +159,22 @@ point <- ggplot()+
   scale_fill_manual(values=cols) +
   guides(fill = FALSE, color = FALSE, size = FALSE) +
   ggspatial::annotation_scale(location = "tr", width_hint = 0.5) +
-  theme_void()
+  theme_void()   
+  #coord_sf(xlim = c(-8991100.255427620, -9003400.255427629), ylim = c(3994200.255427629, 4017500.255427629))
 
 all <- 
   ggplot()+
-  geom_sf(data = filter(parks, UNIT_CODE %in% c("OLYM")), color = "grey", size = 3, alpha = 0.3) +
-  geom_sf(data = olym_lines, aes(color = assessmentunitidentifier), linewidth = 1) +
-  geom_sf(data = olym_points, aes(color = assessmentunitidentifier), size = 3) +
-    geom_sf(data = olym_area, aes(fill = assessmentunitidentifier), color = "white") +
+  geom_sf(data = filter(parks, UNIT_CODE %in% c("ROMO")), color = "grey", size = 3, alpha = 0.3) +
+  geom_sf(data = romo_lines, aes(color = assessmentunitidentifier)) +
+  geom_sf(data = romo_points, aes(color = assessmentunitidentifier), size = 3) +
+    geom_sf(data = romo_area, aes(fill = assessmentunitidentifier), color = "white") +
   scale_fill_manual(values=cols) +
   scale_color_manual(values=cols) +
   guides(fill = FALSE, color = FALSE, size = FALSE) +
   ggspatial::annotation_scale(location = "br", width_hint = 0.5) +
-  theme_void() +
-    coord_sf(xlim = c(-124.82538, -124.31365), ylim = c(48.23291, 47.02024)) 
-
+  theme_void()# +
+  #coord_sf(xlim = c(-13888294.255427629, -13871638.63321514), ylim = c(6114044.786919925,6134637.724682183))
+#124, 47, 48
 ggpubr::ggarrange(point, line, area, all)
 ```
 
@@ -162,7 +188,7 @@ total <- n_distinct(parks$UNIT_CODE)# %>% nrow()
 
 # how many with impairments on the 303d list?
 final_dataset_park %>% filter(ircategory %in% c("5A","5")) %>%
-  distinct(UNIT_CODE) %>% nrow()
+  distinct(UNIT_CODE, .keep_all = TRUE) #%>% nrow()
 
 park_pie <- tibble(for_pie = c("Impaired", "No Impairments"),
                   count = c(count, total - count)) %>%
@@ -357,6 +383,39 @@ ggplot() +
   theme_void() +
   #geom_sf(data = county_map, size = 0.1) +
   geom_sf(data = states, fill = NA) +
-  geom_sf(data = parks_mapper, color = "lightgrey") +
-  geom_sf(data = pathogen_mapper, color = "#DC851E" ) 
+  geom_sf(data = parks_mapper, color = "lightgrey") + 
+  geom_sf(data = pathogen_mapper, color = "#DC851E") 
 ```
+
+
+Which parks have antidegradation protections?
+
+```{r}
+state_mapper <- full_usa %>%
+  usa_mapper()
+  
+parks_mapper <- parks %>%
+  sf::st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  distinct(UNIT_CODE, .keep_all = TRUE) %>%
+  usa_mapper()
+
+orws <- readRDS('data/parks_with_orw.RDS') %>%
+  filter(!is.na(orw_id)) %>%
+  group_by(unit_code) %>%
+  summarize(count = n())
+
+orws_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% orws$unit_code) %>%
+  sf::st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+ggplot() +
+  theme_void() +
+  #geom_sf(data = county_map, size = 0.1) +
+  geom_sf(data = state_mapper, fill = NA) +
+  geom_sf(data = parks_mapper, color = "lightgrey") +
+  geom_sf(data = orws_mapper, color = "#059FA4") 
+```
+

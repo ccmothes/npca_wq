@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
 library(mapview)
-map(list.files('1-src', full.names = TRUE), source)
+map(list.files('src', full.names = TRUE), source)
 ```
 
 This document represents the workflow to access the EPA's ATTAINS water quality status database and relate it to units within the National Park Service (NPS) system. 

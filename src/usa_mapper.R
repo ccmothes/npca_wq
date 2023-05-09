@@ -4,7 +4,7 @@ usa_mapper<-  function (input_sf){
     stop("The input dataset must be an sf object.", call = FALSE)
   }
   #position <- match.arg(position)
-  minimal_states <- tigris::states(resolution = "20m", 
+  minimal_states <- tigris::states(resolution = "500k", 
                                    progress_bar = FALSE, year = 2021) %>% sf::st_transform("ESRI:102003")
   ak_bbox <- minimal_states %>% dplyr::filter(GEOID == "02") %>% 
     sf::st_bbox() %>% sf::st_as_sfc()
