@@ -16,17 +16,6 @@ sf::sf_use_s2(FALSE)
 
 First download all HIS Acces Databases from NPS IRMA:
 ```{r}
-#' Pull metadata from NPS Data Store
-#' 
-#' This function uses the Data Store REST Api to pull metadata for Nation Parks,
-#' specifically  water rights dockets and geospatial datasets.
-#' 
-#' @param park The park unit(s) 4 digit code you want to pull metadata for
-#' @param max The maximum number of entries to return (use a large number to return all entries, default is 1000)
-#' @param save Whether to save the resulting file (TRUE/FALSE)
-#' @param path If `save = TRUE`, the file path to save to
-#' 
-#' @return A single dataframe of metadata for each park
 getHIS <- function(max = 1000, path = "data/in/HIS/"){
   
   #set base URL
@@ -143,7 +132,6 @@ converter <- function(list, small_list){
 map2(list, small_list, possibly(converter, otherwise = print(" has no HIS data!")))
 
 perm_id <- function(x){
-  #x=list.files(path = "data/mid/his_park_orw", pattern = "*ET_Park_plus.csv", full.names = TRUE)[2]
   x <- read.csv(x) %>%
     select(5) %>%
     rename(permanent_identifier = 1) %>%
@@ -154,9 +142,8 @@ perm_id <- function(x){
 }
 
 perm_id <- list.files(path = "data/mid/his_park_orw", pattern = "*ET_Park_plus.csv", full.names = TRUE) %>%
-  map(~perm_id(.)) %>% bind_rows()
-
-
+  map(~perm_id(.)) %>% 
+  bind_rows()
 
 cleaner <- function(x){
   
@@ -176,7 +163,6 @@ cleaner <- function(x){
 
 
 orw_only <- list.files(path = "data/mid/his_park_orw", pattern = "*ET_Park_plus.csv", full.names = TRUE) %>%
-  #map(~read.csv(.)) %>%
   map(~cleaner(.)) %>%
   bind_rows() %>%
   cbind(perm_id) %>%
@@ -187,84 +173,5 @@ orw_only <- list.files(path = "data/mid/his_park_orw", pattern = "*ET_Park_plus.
   mutate(ReachCode = as.character(reachcode))
 
 saveRDS(orw_only, 'data/mid/parks_with_orw.RDS')
-write_csv(orw_only, 'data/mid/parks_with_orw.csv')
-
-```
-
-# For every park, join this info to the NHD:
-```{r}
-orw_only <- readRDS('data/mid/parks_with_orw.RDS')
-nhdhr_park_flows_and_orw <- readRDS('data/mid/nhdhr_park_flow.RDS') %>%
-  mutate(reachcode = as.numeric(ReachCode)) %>%
-  sp::merge(orw_only, by = "reachcode", all.x = TRUE) %>%
-  mutate(Tier = ifelse(UNIT_CODE %in% c("EVER", "YELL", "GRTE", "BISC", "ACAD"), "Tier 3",
-                       ifelse(UNIT_CODE %in% c("CONG", "NATR", "BICY", "CACO", "GLAC", "VOYA", "UPDE", "ROMO", 
-                                               "TIMU", "SLBE", "CANA","INDU", "PIRO", "ISRO"), "Tier 2.5",
-                              ifelse(UNIT_CODE == "BICA" & state == "MT", "Tier 2.5", Tier))))
-
-didnt_work <- anti_join(orw_only, filter(nhdhr_park_flows_and_orw, !is.na(Tier)), by = "reachcode") %>%
-  mutate(gnis_id = as.character(gnis_id))
-
-bad_puller <- function(baddies){
-  
-
-    data <- st_read(dsn = 'data/mid/arc_his/ArcHIS.gdb', layer = baddies) %>%
-      st_transform(4326) %>%
-      st_zm() %>%
-      select(contains("reachcode", ignore.case = TRUE)) %>%
-      rename(reachcode = 1) %>%
-      mutate(reachcode=as.numeric(reachcode)) %>%
-      rename(geometry = 2) %>%
-    inner_join(orw_only, by = "reachcode") %>%
-    st_intersection(., select(parks, UNIT_CODE))
-  # 
-  #   try(data <- st_read(dsn = 'data/mid/arc_his/ArcHIS.gdb', layer = unit) %>%
-  #         mutate(reachcode=as.numeric(ReachCode)) %>%
-  #         select(reachcode))
-  #   
-  return(data)
-  
-}
-
-
-
-baddies <- c("ACAD", "APPA", "BICA", "BICY", "BISC", "BISO", "BLRI", "BRCA", "BUFF", "CAHA", "CANA", "CONG", "CUVA", "DELA", 
-             "DEWA", "DINO", "DRTO", "EVER", "GARI", "GLAC", "GRSM", "GRTE", "GUIS", "HOCU", "INDU", "ISRO", "MACA", "MEVE", 
-             "MISS", "MNRR", "MORR", "NATR", "NERI", "OBRI", "PIRO", "ROMO", "SHIL", "SLBE", "TIMU", "UPDE", "VIIS", "VOYA", 
-             "YELL") %>%
-  map(~bad_puller(.)) #%>%
-  bind_rows()
-
-all_orw_data <- bind_rows(st_transform(nhdhr_park_flows_and_orw, 4326), baddies) %>%
-  filter(!is.na(Tier)) %>% 
-  select(reachcode, UNIT_CODE, Tier, entire_extent_of_orw, designation_name)
-
-parks <- sf::st_read('data/in/nps_boundary/nps_boundary.shp') %>%
-  group_by(UNIT_CODE) %>%
-  summarize() %>%
-  st_transform(4326)
-
-park_table <- sf::st_read('data/in/nps_boundary/nps_boundary.shp') %>%
-  st_drop_geometry() %>%
-  select(UNIT_CODE, STATE, UNIT_NAME) %>%
-  group_by(UNIT_CODE) %>%
-  summarize(names = as.character(list(unique(UNIT_NAME))),
-            states = as.character(list(unique(STATE))),
-            count = n()) %>%
-  mutate(UNIT_NAME = ifelse(UNIT_CODE == "ANIA", "Aniakchak National Monument and Preserve",
-                            ifelse(UNIT_CODE == "DENA", "Denali National Park and Preserve",
-                                   ifelse(UNIT_CODE == "GAAR", "Gates of the Arctic National Park and Preserve",
-                                          ifelse(UNIT_CODE == "GLBA", "Glacier Bay National Park and Preserve",
-                                                 ifelse(UNIT_CODE == "GRSA", "Great Sand Dunes National Park and Preserve",
-                                                        ifelse(UNIT_CODE == "KATM", "Katmai National Park and Preserve",
-                                                               ifelse(UNIT_CODE == "LACL", "Lake Clark National Park and Preserve",
-                                                                      ifelse(UNIT_CODE == "SAGU", "Santa Monica Mountains National Park and Recreation Area",
-                                                                             ifelse(UNIT_CODE == "WRST", "Wrangell-St. Elias National Park and Preserve", names))))))))),     
-         STATE = ifelse(UNIT_CODE == "SAGU", "CA", states)) %>%
-  select(UNIT_CODE, UNIT_NAME, STATE)
-
-# 
-orw <- readRDS('data/mid/all_orws.RDS') %>% filter(!is.na(Tier)) %>% left_join(park_table, by = "UNIT_CODE") %>% rename(Park = UNIT_NAME) %>% sf::st_simplify(dTolerance = 0.001)
-saveRDS(orw, 'shiny/data/orw.RDS')
 ```
 

@@ -14,36 +14,16 @@ sf::sf_use_s2(FALSE)
 ```
 
 
-NPCA would like the shiny app to include the option of viewing ATTAINS data for waters upstream of park units. We must first
+NPCA would like the shiny app to include the option of viewing ATTAINS data for waters upstream of park units.
 
 ```{r}
-parks <- sf::st_read('data/in/nps_boundary/nps_boundary.shp') %>%
-  st_drop_geometry() %>%
-  select(UNIT_CODE, STATE, UNIT_NAME) %>%
-  group_by(UNIT_CODE) %>%
-  summarize(names = as.character(list(unique(UNIT_NAME))),
-            states = as.character(list(unique(STATE))),
-            count = n()) %>%
-  mutate(UNIT_NAME = ifelse(UNIT_CODE == "ANIA", "Aniakchak National Monument and Preserve",
-                     ifelse(UNIT_CODE == "DENA", "Denali National Park and Preserve",
-                     ifelse(UNIT_CODE == "GAAR", "Gates of the Arctic National Park and Preserve",
-                     ifelse(UNIT_CODE == "GLBA", "Glacier Bay National Park and Preserve",
-                     ifelse(UNIT_CODE == "GRSA", "Great Sand Dunes National Park and Preserve",
-                     ifelse(UNIT_CODE == "KATM", "Katmai National Park and Preserve",
-                     ifelse(UNIT_CODE == "LACL", "Lake Clark National Park and Preserve",
-                     ifelse(UNIT_CODE == "SAGU", "Santa Monica Mountains National Park and Recreation Area",
-                     ifelse(UNIT_CODE == "WRST", "Wrangell-St. Elias National Park and Preserve", names))))))))),     
-         STATE = ifelse(UNIT_CODE == "SAGU", "CA", states)) %>%
-  select(UNIT_CODE, UNIT_NAME, STATE)
+park_table <- sf::st_read('data/in/nps_boundary.shp') %>%
+  st_drop_geometry() 
 
-# Load in park boundaries:
-park_boundaries <- sf::st_read('data/in/nps_boundary.shp') %>%
-  group_by(UNIT_CODE) %>%
-  summarize() %>%
-  left_join(parks, by = "UNIT_CODE")
+park_boundaries <- sf::st_read('data/in/nps_boundary.shp')
 
-# Pull in all water features in NHDPlus V2:
-# layers <- sf::st_layers(dsn = 'data/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb')
+park_lines <- park_boundaries %>%
+  sf::st_cast("MULTILINESTRING")
 
 nhd_flowlines <- sf::st_read(dsn = 'data/in/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb',
                              layer = "NHDFlowline_Network")
@@ -57,12 +37,11 @@ nhd_other <- sf::st_read(dsn = 'data/in/NHDPlusV21_National_Seamless_Flattened_L
 contus_catchments <- readRDS('data/mid/nhdplus_contus_catchments_3857.RDS') %>%
   rowid_to_column()
 
-#nhd <- read_csv('data/nhd_flow_network.csv')
-
 # Identify catchments contained within park units that have a water feature WITHIN the park boundary.
 # This is a necessary step for removing catchments whose contributing area it represents is for a
 # waterbody outside the park boundary. Examples: Antietam NP accidentally tracing the entire Potomac
 # River watershed.
+
 flows <- nhd_flowlines %>%
   sf::st_zm() %>%
   .[park_boundaries,] %>%
@@ -87,6 +66,9 @@ other <- nhd_other %>%
 # This represents COMIDs whose water features actually exists in the park:
 flows_in_parks <- bind_rows(flows, bods, other) %>%
   distinct(comid)
+
+# tabular nhd:
+nhd_flowlines <- read_csv('data/in/nhd_flow_network.csv')
 
 downstream_finder <- function(park){
   
@@ -122,36 +104,25 @@ downstream_finder <- function(park){
   
 }
 
-# identiifies flowlines that are DOWNSTREAM of the park (therefore we dont want to perform an upstream trace of them)
+# identifies flowlines that are DOWNSTREAM of the park (therefore we don't want to perform an upstream trace of them)
 downstream_comids <- park_boundaries$UNIT_CODE %>%
   map(~downstream_finder(.)) %>%
   bind_rows()
-
-# identify catchments with a water feature in the park's boundary:
-# subset_sites <- contus_catchments %>%
-#   sf::st_intersection(park_boundaries) %>%
-#   sf::st_drop_geometry() %>%
-#   rename(comid = FEATUREID) %>%
-#   filter(comid %in% flows_in_parks$comid) %>%
-#   left_join(st_drop_geometry(flowlines, by = c("comid" = "COMID")))
-
-#saveRDS(subset_sites,'data/mid/park_water_catchments.RDS')
-```
-
-```{r}
-nhd_flowlines <- read_csv('data/in/nhd_flow_network.csv')
 
 # COMIDS that intersect park line:
 park_lines <- park_boundaries %>%
   sf::st_cast("MULTILINESTRING")
 
-subset_sites <- readRDS('data/mid/park_water_catchments.RDS') %>%
-  dplyr::filter(comid %in% readRDS('data/mid/nps_outside.RDS')$comid) %>%
-  dplyr::filter(!comid %in% downstream_comids$comid)
-
-# subset_of <- contus_catchments %>%
-#   dplyr::filter(COMID %in% subset_sites$comid) %>%
-#   sf::st_difference(., park_boundaries)
+# identify catchments with a water feature in the park's boundary:
+subset_sites <- contus_catchments %>%
+  sf::st_intersection(park_boundaries) %>%
+  sf::st_drop_geometry() %>%
+  rename(comid = FEATUREID) %>%
+  filter(comid %in% flows_in_parks$comid,
+         !comid %in% downstream_comids$comid) %>%
+  .[park_lines,] %>%
+  left_join(st_drop_geometry(nhd_flowlines, by = c("comid" = "COMID")))
+saveRDS(subset_sites,'data/mid/park_water_catchments.RDS')
 
 park_list <- park_boundaries %>%
   sf::st_drop_geometry() %>%
@@ -168,8 +139,6 @@ for(i in 1:length(park_list)){
   # watershed delineator function
   watersheder <- function(park_subset_sites){
     
-    # length <- nhd_flowlines %>% filter(COMID == park_subset_sites) %>%
-    #   .$LENGTHKM
     
     # create an empty tibble in case there is no upstream data
     upstream_nhd <- tibble(UNIT_CODE = park_list[i],
@@ -182,8 +151,6 @@ for(i in 1:length(park_list)){
                      value = park_subset_sites))
     )
     
-    #write_csv(upstream_nhd, paste0('data/mid/ws_comids_100km/', park_subset_sites, "_", park_list[i], '.csv'))
-    
     return(upstream_nhd)
   }
   
@@ -193,8 +160,7 @@ for(i in 1:length(park_list)){
   try(
     thing <- purrr::map(park_subset_sites, watersheder) %>%
       bind_rows() %>%
-      dplyr::rename(comid = value)# %>%
-    #dplyr::filter(!comid %in% park_subset_sites)
+      dplyr::rename(comid = value)
   )
   
   # for every park, back up the trace 
@@ -208,51 +174,35 @@ for(i in 1:length(park_list)){
 short <- str_sub(list.files('data/mid/ws_comids_100km/', full.names = FALSE) , start = 1, end = 4)
 
 for(i in 1:length(short)){
-  # for every park unit name, 
-  # subbed <- subset_sites %>%
-  #   filter(UNIT_CODE == short[i])
-  # park <- filter(park_boundaries, UNIT_CODE == short[i])
   shorty <- read_csv(paste0('data/mid/ws_comids_100km/', short[i], '.csv'))
   contus_catchments %>%
-    
     dplyr::filter(FEATUREID %in% shorty$comid) %>%
-    
-    # bind_rows(dplyr::filter(subset_sites, UNIT_CODE == short[i])) %>%
     summarize() %>%
     nngeo::st_remove_holes() %>%
-    # sf::st_difference(., park) %>%
     dplyr::mutate(UNIT_CODE = short[i]) %>%
     saveRDS(paste0('data/mid/park_ws_shapes_100km/', short[i], '.RDS'))
   print(paste0(short[i], " watershed saved!"))
 }
 
+# join all watersheds together:
 summed <- list.files('data/mid/park_ws_shapes_100km/', full.names = TRUE) %>%
   map(~readRDS(.)) %>%
   bind_rows() %>%
   # why is this not working... >:(
   #sf::st_difference(., park_boundaries) %>%
-  group_by(UNIT_CODE) %>%
-  summarize() %>%
-  left_join(parks, by = "UNIT_CODE")
+  left_join(park_table, by = "UNIT_CODE")
 saveRDS(summed,'data/mid/all_nps_watersheds_100km.RDS')
 
 mini <- summed %>% 
-   sf::st_simplify(dTolerance = 0.001)
+  sf::st_simplify(dTolerance = 0.001)
 saveRDS(mini,'shiny/data/ws.RDS')
-
 ```
 
 Getting ATTAINS data within the park watersheds
 ```{r}
-npca_regions <- sf::st_read("data/in/npca_regions.shp") 
-
-park_boundaries <- sf::st_read('data/in/nps_boundary.shp') %>%
-  group_by(UNIT_CODE) %>%
-  summarize()
-
-# Lastly remove all data linked to parks without water features in them (CONTUS only):
+# Remove data linked to parks without water features in them (CONTUS only):
 no_water <- park_boundaries %>%
-  #filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
+  filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
   # this is a weird lil park in the Middle of Lake Erie:
   filter(UNIT_CODE != "PEVI") %>%
   # clipped water features from the NHD HR:
@@ -262,45 +212,6 @@ no_water <- park_boundaries %>%
   bind_rows(filter(park_boundaries, UNIT_NAME %in% read_csv('data/in/no_water_parks.csv')$UNIT_NAME)) %>%
   distinct(UNIT_NAME, .keep_all = TRUE) %>%
   mutate(hydro = "No Water Features")
-
-# outside_catchments <- readRDS('data/mid/nps_outside.RDS') %>%
-#   left_join(., st_drop_geometry(park_boundaries), by = c("Park" = "UNIT_NAME")) %>%
-#   group_by(UNIT_CODE) %>%
-#   summarize() %>%
-#   st_transform(3857) %>%
-#   st_make_valid()
-
-# ws <- list.files('data/mid/park_ws_shapes_100km/', full.names = TRUE)
-# 
-# ws_maker <- function(ws){
-#   
-#   try(full <- bind_rows(filter(summed, UNIT_CODE ==  str_sub(ws, -8, -5)),
-#                         st_make_valid(st_zm(readRDS(ws)))) %>%
-#         
-#         summarize() %>%
-#         nngeo::st_remove_holes() %>%
-#         sf::st_difference(., filter(park_boundaries, UNIT_CODE ==  str_sub(ws, -8, -5))))
-#   
-#   try(saveRDS(full, paste0('data/mid/park_outside/', str_sub(ws, -8, -5), '.RDS')))
-#   
-#   print(paste0(ws, " done!"))
-#   
-#   try(return(full))
-#   
-#   
-# }
-# 
-# all_the_watersheds <- ws %>%
-#   map(~ws_maker(.))
-# 
-# all_the_watersheds <-  list.files('data/mid/park_outside/', full.names = TRUE) %>%
-#   map(~readRDS(.)) %>%
-#   bind_rows() %>%
-#   st_transform(4269) %>%
-#   #st_cast("POLYLINE") %>%
-#   filter(!UNIT_NAME %in% no_water$UNIT_NAME)
-
-sf::sf_use_s2(FALSE)
 
 # Load in all raw geospatial ATTAINS data:
 attains_areas <- readRDS('data/mid/attains_au_areas.RDS') 
@@ -313,6 +224,7 @@ attains_points <- readRDS('data/mid/attains_au_points.RDS')
 attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
 
 raw_ws <- list.files('data/mid/park_ws_shapes_100km/', full.names = TRUE) 
+
 data_puller <- function(raw_ws, layer){
   
   ws <- readRDS(raw_ws) %>%
@@ -321,17 +233,18 @@ data_puller <- function(raw_ws, layer){
   
   try(ws <- ws %>% sf::st_cast("POLYGON"))
   
-  areas <- st_zm(layer) %>%
+  attains_within <- st_zm(layer) %>%
     sf::st_intersection(., st_zm(ws)) %>%
     left_join(attains_assmnt_parms, by = 'assessmentunitidentifier')
   
   print(paste0(raw_ws, " done!"))
-  return(areas)
+  
+  return(attains_within)
   
 }
 
 attains_aread <- raw_ws %>%
- map(~data_puller(raw_ws = ., layer = attains_areas)) %>%
+  map(~data_puller(raw_ws = ., layer = attains_areas)) %>%
   bind_rows()
 saveRDS(attains_aread, 'data/mid/attains_ws_areas.RDS')
 
@@ -361,7 +274,6 @@ colors = data.frame(
 park_area_impaired <- readRDS('data/mid/attains_ws_areas.RDS') %>%
   dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>% 
   left_join(., park_table, by = "UNIT_CODE") %>%
-  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   group_by(assessmentunitidentifier, UNIT_NAME) %>%
   summarize(Impairments = as.character(list(unique(parametername))),
             Assessment_Category = "Impaired",
@@ -383,7 +295,6 @@ park_area_good <- readRDS('data/mid/attains_ws_areas.RDS') %>%
   dplyr::filter(!assessmentunitidentifier %in% park_area_impaired$assessmentunitidentifier) %>%
   dplyr::filter(ircategory %in% c("1","2")) %>% 
   left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
-  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   group_by(assessmentunitidentifier, UNIT_NAME) %>%
   summarize(Impairments = "None",
             Assessment_Category = "Good",
@@ -403,7 +314,6 @@ park_area_unknown <- readRDS('data/mid/attains_ws_areas.RDS') %>%
   dplyr::filter(!assessmentunitidentifier %in% park_area_good$assessmentunitidentifier) %>%
   dplyr::filter(ircategory %in% c("3")) %>%
   left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
-  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   group_by(assessmentunitidentifier, UNIT_NAME) %>%
   summarize(Impairments = "Unknown",
             Assessment_Category = "Unknown",
@@ -418,21 +328,9 @@ park_area_unknown <- readRDS('data/mid/attains_ws_areas.RDS') %>%
          dark_col) %>% 
   st_transform(4326)
 
-no_water <- park_boundaries %>%
-  filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
-  # this is a weird lil park in the Middle of Lake Erie:
-  filter(UNIT_CODE != "PEVI") %>%
-  # clipped water features from the NHD HR:
-  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_area.RDS')$UNIT_CODE) %>%
-  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_flow.RDS')$UNIT_CODE) %>%
-  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_waterbody.RDS')$UNIT_CODE) %>%
-  bind_rows(filter(park_boundaries, UNIT_NAME %in% read_csv('data/in/no_water_parks.csv')$UNIT_NAME)) %>%
-  distinct(UNIT_NAME, .keep_all = TRUE) %>%
-  mutate(hydro = "No Water Features")
-
 park_ws_areas <- bind_rows(park_area_impaired, park_area_good, park_area_unknown) %>%
   filter(!Park %in% no_water$UNIT_NAME) %>%
-   sf::st_simplify(dTolerance = 0.001)
+  sf::st_simplify(dTolerance = 0.001)
 saveRDS(park_ws_areas, 'shiny/data/ws_areas.RDS')
 
 # LINE #
@@ -440,7 +338,6 @@ saveRDS(park_ws_areas, 'shiny/data/ws_areas.RDS')
 park_line_impaired <- readRDS('data/mid/attains_ws_lines.RDS') %>%
   dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>% 
   left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
-  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   group_by(assessmentunitidentifier, UNIT_NAME) %>%
   summarize(Impairments = as.character(list(unique(parametername))),
             Assessment_Category = "Impaired",
@@ -461,7 +358,6 @@ park_line_good <- readRDS('data/mid/attains_ws_lines.RDS') %>%
   dplyr::filter(!assessmentunitidentifier %in% park_line_impaired$assessmentunitidentifier) %>%
   dplyr::filter(ircategory %in% c("1","2")) %>% 
   left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
-  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   group_by(assessmentunitidentifier, UNIT_NAME) %>%
   summarize(Impairments = "None",
             Assessment_Category = "Good",
@@ -481,7 +377,6 @@ park_line_unknown <- readRDS('data/mid/attains_ws_lines.RDS') %>%
   dplyr::filter(!assessmentunitidentifier %in% park_line_good$assessmentunitidentifier) %>%
   dplyr::filter(ircategory %in% c("3")) %>% 
   left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
-  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   group_by(assessmentunitidentifier, UNIT_NAME) %>%
   summarize(Impairments = "Unknown",
             Assessment_Category = "Unknown",
@@ -574,6 +469,5 @@ all_the_watersheds <-  list.files('data/mid/park_outside/', full.names = TRUE) %
   filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   select(Park = UNIT_NAME)
 saveRDS(all_the_watersheds, 'shiny/data/ws.RDS')
-
 ```
 

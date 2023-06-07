@@ -1,6 +1,6 @@
 # parks or catchments
 
-subsetATTAINSpark <- function(layer, sub_by = parks,  type, path = 'data/mid/'){
+subsetATTAINS <- function(layer, sub_by = parks,  type){
   
     # if(exists("parks") == FALSE) {parks <- getParkUnits(projection = 3857)}
     
@@ -35,16 +35,6 @@ subsetATTAINSpark <- function(layer, sub_by = parks,  type, path = 'data/mid/'){
       mutate(office = ifelse(is.na(office) & state =="TX", "Texas",
                       ifelse(is.na(office) & state =="MN", "Midwest", office)))
     
-    # Save as RDS + shapefile
-    #saveRDS(nps_attains, paste0(path, '/nps_attains_catchment_', type, '.RDS'))
-    
-    # nps_attained <- nps_attains %>% 
-    # 
-    #   dplyr::select(UNIT_CODE, assessmentunitidentifier, Shape) %>%
-    #   sf::st_cast("MULTIPOLYGON")
-      
-    # sf::st_write(nps_attained, paste0(path, '/nps_attains_catchment_', type, '.shp'), 
-    #                                                                                      append = FALSE)
     print(paste0(type, " complete!"))
     
     return(nps_attains)

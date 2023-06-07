@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Finding ATTAINS Weirds (CIP-lite)"
 author: "Katie Willi"
 date: "`r Sys.Date()`"
 output: html_document
@@ -7,13 +7,14 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
 ```
 
 Identifying appropriate catchment-assessment unit combinations
 ```{r}
 # Load in park boundaries (from NPS IRMA)
-parks <- sf::st_read("data/in/nps_boundary/nps_boundary.shp") %>%
-  sf::st_transform(3857)
+parks <- sf::st_read("data/in/nps_boundary.shp")
 
 # List of HUC-2s to map over:
 hucs <- (c("01","02","03","04","05","06","07","08","09","10",
@@ -32,7 +33,7 @@ park_lines <- readRDS('data/mid/attains_au_lines.RDS') %>%
 park_areas$total_area <- sf::st_area(park_areas, by_element = TRUE)
 park_lines$total_length <- sf::st_length(park_lines, by_element = TRUE)
 
-figure_it_out <- function(hucs){
+find_the_baddies <- function(hucs){
   
   # Where to find our HUC-4 datasets:
   nhdhr <- paste0('data/in/nhdplushr/', hucs, "/")
@@ -72,7 +73,7 @@ figure_it_out <- function(hucs){
   
 }
 
-walk(hucs, figure_it_out)
+walk(hucs, find_the_baddies)
 
 right_dims_lines <- list.files('data/mid/catchment_au_test/', pattern = "lines", full.names = TRUE) %>%
   map(~readRDS(.)) %>%
@@ -86,6 +87,8 @@ saveRDS(right_dims_lines, 'data/mid/right_dims_lines.RDS')
 right_dims_areas <- list.files('data/mid/catchment_au_test/', pattern = "areas", full.names = TRUE) %>%
   map(~readRDS(.)) %>%
   bind_rows() %>%
+           # catchments must containat least 1% of the total area of the assessment unit:
   filter(((as.numeric(catchment_area)/as.numeric(total_area)) >= 0.01) | 
+           # or, the assessment unit covers at least 50% of the catchment:
            as.numeric(catchment_area) >= (as.numeric(square_meters)*.5))
 saveRDS(right_dims_areas, 'data/mid/right_dims_areas.RDS')

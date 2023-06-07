@@ -1,9 +1,10 @@
+# adapted from the tigris package's PR/HI/AK visualizing code
+
 usa_mapper<-  function (input_sf){
-  
   if (!any(grepl("sf", class(input_sf)))) {
     stop("The input dataset must be an sf object.", call = FALSE)
   }
-  #position <- match.arg(position)
+  
   minimal_states <- tigris::states(resolution = "500k", 
                                    progress_bar = FALSE, 
                                    year = 2021) %>% 
@@ -24,8 +25,7 @@ usa_mapper<-  function (input_sf){
   ma_bbox <- minimal_states %>% dplyr::filter(GEOID == "69") %>% 
     sf::st_bbox() %>% sf::st_as_sfc()
   
-  input_sf <- sf::st_transform(input_sf, sf::st_crs(minimal_states)) #%>%
-  #filter(!STUSPS %in% c("AS"))
+  input_sf <- sf::st_transform(input_sf, sf::st_crs(minimal_states))
   
   ak_check <- suppressMessages(sf::st_intersects(input_sf, 
                                                  ak_bbox, sparse = FALSE)[, 1])

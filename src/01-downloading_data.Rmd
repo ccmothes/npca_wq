@@ -28,37 +28,58 @@ unzip(temp1, exdir = temp2)
 
 sf::sf_use_s2(FALSE)
 
+park_table <- sf::st_read(dsn = temp2) %>%
+  st_drop_geometry() %>%
+  select(UNIT_CODE, STATE, UNIT_NAME) %>%
+  group_by(UNIT_CODE) %>%
+  summarize(names = as.character(list(unique(UNIT_NAME))),
+            states = as.character(list(unique(STATE))),
+            count = n()) %>%
+  mutate(UNIT_NAME = ifelse(UNIT_CODE == "ANIA", "Aniakchak National Monument and Preserve",
+                     ifelse(UNIT_CODE == "DENA", "Denali National Park and Preserve",
+                     ifelse(UNIT_CODE == "GAAR", "Gates of the Arctic National Park and Preserve",
+                     ifelse(UNIT_CODE == "GLBA", "Glacier Bay National Park and Preserve",
+                     ifelse(UNIT_CODE == "GRSA", "Great Sand Dunes National Park and Preserve",
+                     ifelse(UNIT_CODE == "KATM", "Katmai National Park and Preserve",
+                     ifelse(UNIT_CODE == "LACL", "Lake Clark National Park and Preserve",
+                     ifelse(UNIT_CODE == "SAGU", "Santa Monica Mountains National Park and Recreation Area",
+                     ifelse(UNIT_CODE == "WRST", "Wrangell-St. Elias National Park and Preserve", names))))))))),     
+         STATE = ifelse(UNIT_CODE == "SAGU", "CA", states)) %>%
+  select(UNIT_CODE, UNIT_NAME, STATE)
+
 parks <- sf::st_read(dsn = temp2) %>%
-  dplyr::select(UNIT_CODE, UNIT_NAME, PARK_NAME = PARKNAME, UNIT_TYPE) %>%
+  group_by(UNIT_CODE) %>%
+  summarize() %>%
   sf::st_transform(3857) %>%
+  left_join(park_table, by = "UNIT_CODE") %>%
+  dplyr::select(UNIT_CODE, UNIT_NAME, STATE) %>%
   sf::st_write('data/in/nps_boundary.shp')
 ```
 
 Make NPCA regional boundaries layer:
 ```{r}
-npca_regions <- 
-  tibble::tibble(state = c("AK",
-                                         "DE", "DC", "MD", "PA", "VA", "WV",
-                                         "IL", "IN", "IA", "KS", "NE", "OH", "MI", "MN", "MO", "SD", "WI",
-                                         "CT", "ME", "NH", "NJ", "NY", "MA", "RI", "VT",
-                                         "ID", "MT", "ND", "WY",
-                                         "OR", "WA",
-                                         "AS", "CA", "HI", "NV", "GU",
-                                         "AL", "AR", "GA", "KY", "NC", "MS", "SC", "TN",
-                                         "AZ", "CO", "NM", "UT",
-                                         "FL", "LA", "PR", "VI",
-                                         "TX", "OK"),
-                               office = c("Alaska",
-                                          "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic",
-                                          "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest",
-                                          "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast",
-                                          "Northern Rockies", "Northern Rockies", "Northern Rockies", "Northern Rockies",
-                                          "Northwest", "Northwest",
-                                          "Pacific", "Pacific", "Pacific", "Pacific", "Pacific",
-                                          "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast",
-                                          "Southwest", "Southwest", "Southwest", "Southwest",
-                                          "Suncoast", "Suncoast", "Suncoast", "Suncoast",
-                                          "Texas", "Texas"))
+npca_regions <-  tibble::tibble(state = c("AK",
+                                          "DE", "DC", "MD", "PA", "VA", "WV",
+                                          "IL", "IN", "IA", "KS", "NE", "OH", "MI", "MN", "MO", "SD", "WI",
+                                          "CT", "ME", "NH", "NJ", "NY", "MA", "RI", "VT",
+                                          "ID", "MT", "ND", "WY",
+                                          "OR", "WA",
+                                          "AS", "CA", "HI", "NV", "GU",
+                                          "AL", "AR", "GA", "KY", "NC", "MS", "SC", "TN",
+                                          "AZ", "CO", "NM", "UT",
+                                          "FL", "LA", "PR", "VI",
+                                          "TX", "OK"),
+                                office = c("Alaska",
+                                           "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic",
+                                           "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest",
+                                           "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast",
+                                           "Northern Rockies", "Northern Rockies", "Northern Rockies", "Northern Rockies",
+                                           "Northwest", "Northwest",
+                                           "Pacific", "Pacific", "Pacific", "Pacific", "Pacific",
+                                           "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast",
+                                           "Southwest", "Southwest", "Southwest", "Southwest",
+                                           "Suncoast", "Suncoast", "Suncoast", "Suncoast",
+                                           "Texas", "Texas"))
 
 npca_regions <- tigris::states() %>%
   sf::st_transform(3857) %>%
@@ -76,7 +97,7 @@ download.file(paste0("https://dmap-data-commons-ow.s3.amazonaws.com/data/ATTAINS
 unzip(temp1, exdir = "data/in/ATTAINS")
 
 # The ATTAINS catchment layer is huge and takes forever to load. Here I'm converting in to an RDS file which saves a huge amount of time when needing
-# to ever load it in to your environment. Doing the same for other layers for consistency:
+# to load it in to your environment (why is this? . Doing the same for other layers for consistency:
 
 attains_catchments <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
                                   layer = "attains_au_catchments")
@@ -99,7 +120,7 @@ attains_assmnt_parms <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.nam
 saveRDS(attains_assmnt_parms, 'data/mid/attains_au_assmnt_parms.RDS')
 
 attains_attributes <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                                    layer = "attains_au_attributes")
+                                  layer = "attains_au_attributes")
 saveRDS(attains_attributes, 'data/mid/attains_au_attributes.RDS')
 
 attains_meta <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
@@ -117,8 +138,8 @@ hucs <- c("01","02","03","04","05","06","07","08","09","10",
 
 for(i in 1:length(hucs)){
   nhdplusTools::download_nhdplushr('data/in/nhdplushr/',
-                                       hucs[i], 
-                                       download_files = TRUE)
+                                   hucs[i], 
+                                   download_files = TRUE)
 }
 
 # Did all the hucs download?
