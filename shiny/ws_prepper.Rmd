@@ -1,0 +1,473 @@
+---
+title: "app_prep"
+author: "Katie Willi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(mapview)
+library(nngeo) # for removing annoying holes in watersheds
+sf::sf_use_s2(FALSE)
+```
+
+
+NPCA would like the shiny app to include the option of viewing ATTAINS data for waters upstream of park units.
+
+```{r}
+park_table <- sf::st_read('data/in/nps_boundary.shp') %>%
+  st_drop_geometry() 
+
+park_boundaries <- sf::st_read('data/in/nps_boundary.shp')
+
+park_lines <- park_boundaries %>%
+  sf::st_cast("MULTILINESTRING")
+
+nhd_flowlines <- sf::st_read(dsn = 'data/in/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb',
+                             layer = "NHDFlowline_Network")
+
+nhd_waterbody <- sf::st_read(dsn = 'data/in/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb',
+                             layer = "NHDWaterbody")
+
+nhd_other <- sf::st_read(dsn = 'data/in/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb',
+                         layer = "NHDFlowline_NonNetwork")
+
+contus_catchments <- readRDS('data/mid/nhdplus_contus_catchments_3857.RDS') %>%
+  rowid_to_column()
+
+# Identify catchments contained within park units that have a water feature WITHIN the park boundary.
+# This is a necessary step for removing catchments whose contributing area it represents is for a
+# waterbody outside the park boundary. Examples: Antietam NP accidentally tracing the entire Potomac
+# River watershed.
+
+flows <- nhd_flowlines %>%
+  sf::st_zm() %>%
+  .[park_boundaries,] %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(FTYPE != "Coastline" & FCODE != 56600) %>%
+  dplyr::select(comid = COMID)
+
+bods <- nhd_waterbody %>%
+  sf::st_zm() %>%
+  .[park_boundaries,] %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(FTYPE != "Coastline" & FCODE != 56600) %>%
+  dplyr::select(comid = COMID)
+
+other <- nhd_other %>%
+  sf::st_zm() %>%
+  .[park_boundaries,] %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(FTYPE != "Coastline" & FCODE != 56600) %>%
+  dplyr::select(comid = COMID)
+
+# This represents COMIDs whose water features actually exists in the park:
+flows_in_parks <- bind_rows(flows, bods, other) %>%
+  distinct(comid)
+
+# tabular nhd:
+nhd_flowlines <- read_csv('data/in/nhd_flow_network.csv')
+
+downstream_finder <- function(park){
+  
+  aoi <- filter(park_boundaries, UNIT_CODE == park)
+  
+  # download flowlines for entire aoi
+  try(nhd_flowlines <- nhdplusTools::get_nhdplus(AOI = aoi, 
+                                                 realization='flowline'))
+  
+  # add `tocomid` field to ID flowlines that cross over the aoi
+  # this step massively speeds up run time by reducing the number
+  # of watersheds that need to be created
+  try(park_flowlines <- nhd_flowlines  %>%
+        dplyr::select(-id) %>%
+        dplyr::distinct(comid, .keep_all=TRUE) %>%
+        nhdplusTools::get_tocomid(., add=TRUE))
+  
+  outsiders <- tibble(UNIT_CODE = park,
+                      comid = NA)
+  
+  # minimize number of origin points by selecting only those that cross park boundary
+  try(
+    outsiders <- park_flowlines %>%
+      # to comid means there are no additional downstream flowlines:
+      filter(tocomid==0) %>%
+      dplyr::select(comid) %>%
+      mutate(UNIT_CODE = park)
+  )
+  
+  print(paste0(park, " done"))
+  
+  return(outsiders)
+  
+}
+
+# identifies flowlines that are DOWNSTREAM of the park (therefore we don't want to perform an upstream trace of them)
+downstream_comids <- park_boundaries$UNIT_CODE %>%
+  map(~downstream_finder(.)) %>%
+  bind_rows()
+
+# COMIDS that intersect park line:
+park_lines <- park_boundaries %>%
+  sf::st_cast("MULTILINESTRING")
+
+# identify catchments with a water feature in the park's boundary:
+subset_sites <- contus_catchments %>%
+  sf::st_intersection(park_boundaries) %>%
+  sf::st_drop_geometry() %>%
+  rename(comid = FEATUREID) %>%
+  filter(comid %in% flows_in_parks$comid,
+         !comid %in% downstream_comids$comid) %>%
+  .[park_lines,] %>%
+  left_join(st_drop_geometry(nhd_flowlines, by = c("comid" = "COMID")))
+saveRDS(subset_sites,'data/mid/park_water_catchments.RDS')
+
+park_list <- park_boundaries %>%
+  sf::st_drop_geometry() %>%
+  distinct(UNIT_CODE) %>%
+  .$UNIT_CODE
+
+for(i in 1:length(park_list)){
+  
+  park_subset_sites <- subset_sites %>%
+    dplyr::filter(UNIT_CODE == park_list[i]) %>%
+    distinct(comid, .keep_all = TRUE) %>%
+    .$comid
+  
+  # watershed delineator function
+  watersheder <- function(park_subset_sites){
+    
+    
+    # create an empty tibble in case there is no upstream data
+    upstream_nhd <- tibble(UNIT_CODE = park_list[i],
+                           value = NA)
+    try(
+      upstream_nhd <- nhdplusTools::get_UT(nhd_flowlines, park_subset_sites, distance = 100) %>%
+        as_tibble() %>%
+        mutate(UNIT_CODE = park_list[i]) %>%
+        rbind(tibble(UNIT_CODE = park_list[i],
+                     value = park_subset_sites))
+    )
+    
+    return(upstream_nhd)
+  }
+  
+  thing <- tibble(UNIT_CODE = park_list[i],
+                  comid = NA)
+  
+  try(
+    thing <- purrr::map(park_subset_sites, watersheder) %>%
+      bind_rows() %>%
+      dplyr::rename(comid = value)
+  )
+  
+  # for every park, back up the trace 
+  write_csv(thing, paste0('data/mid/ws_comids_100km/', park_list[i], '.csv'))
+  
+  print(paste0(park_list[i], " complete!"))
+  
+}
+
+# Convert our watershed lists into catchment shapefiles
+short <- str_sub(list.files('data/mid/ws_comids_100km/', full.names = FALSE) , start = 1, end = 4)
+
+for(i in 1:length(short)){
+  shorty <- read_csv(paste0('data/mid/ws_comids_100km/', short[i], '.csv'))
+  contus_catchments %>%
+    dplyr::filter(FEATUREID %in% shorty$comid) %>%
+    summarize() %>%
+    nngeo::st_remove_holes() %>%
+    dplyr::mutate(UNIT_CODE = short[i]) %>%
+    saveRDS(paste0('data/mid/park_ws_shapes_100km/', short[i], '.RDS'))
+  print(paste0(short[i], " watershed saved!"))
+}
+
+# join all watersheds together:
+summed <- list.files('data/mid/park_ws_shapes_100km/', full.names = TRUE) %>%
+  map(~readRDS(.)) %>%
+  bind_rows() %>%
+  # why is this not working... >:(
+  #sf::st_difference(., park_boundaries) %>%
+  left_join(park_table, by = "UNIT_CODE")
+saveRDS(summed,'data/mid/all_nps_watersheds_100km.RDS')
+
+mini <- summed %>% 
+  sf::st_simplify(dTolerance = 0.001)
+saveRDS(mini,'shiny/data/ws.RDS')
+```
+
+Getting ATTAINS data within the park watersheds
+```{r}
+# Remove data linked to parks without water features in them (CONTUS only):
+no_water <- park_boundaries %>%
+  filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
+  # this is a weird lil park in the Middle of Lake Erie:
+  filter(UNIT_CODE != "PEVI") %>%
+  # clipped water features from the NHD HR:
+  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_area.RDS')$UNIT_CODE) %>%
+  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_flow.RDS')$UNIT_CODE) %>%
+  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_waterbody.RDS')$UNIT_CODE) %>%
+  bind_rows(filter(park_boundaries, UNIT_NAME %in% read_csv('data/in/no_water_parks.csv')$UNIT_NAME)) %>%
+  distinct(UNIT_NAME, .keep_all = TRUE) %>%
+  mutate(hydro = "No Water Features")
+
+# Load in all raw geospatial ATTAINS data:
+attains_areas <- readRDS('data/mid/attains_au_areas.RDS') 
+
+attains_lines <- readRDS('data/mid/attains_au_lines.RDS')
+
+attains_points <- readRDS('data/mid/attains_au_points.RDS')
+
+# Load in ATTAINS water quality standard parameter data:
+attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
+
+raw_ws <- list.files('data/mid/park_ws_shapes_100km/', full.names = TRUE) 
+
+data_puller <- function(raw_ws, layer){
+  
+  ws <- readRDS(raw_ws) %>%
+    dplyr::select(UNIT_CODE) %>%
+    st_make_valid() 
+  
+  try(ws <- ws %>% sf::st_cast("POLYGON"))
+  
+  attains_within <- st_zm(layer) %>%
+    sf::st_intersection(., st_zm(ws)) %>%
+    left_join(attains_assmnt_parms, by = 'assessmentunitidentifier')
+  
+  print(paste0(raw_ws, " done!"))
+  
+  return(attains_within)
+  
+}
+
+attains_aread <- raw_ws %>%
+  map(~data_puller(raw_ws = ., layer = attains_areas)) %>%
+  bind_rows()
+saveRDS(attains_aread, 'data/mid/attains_ws_areas.RDS')
+
+attains_lined <- raw_ws %>%
+  map(~data_puller(raw_ws = ., layer = attains_lines)) %>%
+  bind_rows()
+saveRDS(attains_lined, 'data/mid/attains_ws_lines.RDS')
+
+attains_pointed <- raw_ws %>%
+  map(~data_puller(raw_ws = ., layer = attains_points)) %>%
+  bind_rows()
+saveRDS(attains_pointed, 'data/mid/attains_ws_points.RDS')
+```
+
+Prepping it for the app:
+```{r}
+park_table <- st_drop_geometry(park_boundaries)
+
+colors = data.frame(
+  Assessment_Category = c("Impaired", "Good", "Unknown", "No State Data", "No Water Features"),
+  col = c("#DC851E", "#059FA4", "#A1A522", "#C2CAD7", NA),
+  dark_col = c("#813B00", "#005258", "#4F5900", "#5A616D", NA),
+  Priority = c(1, 2, 3, 4, 5))
+
+# AREA #
+
+park_area_impaired <- readRDS('data/mid/attains_ws_areas.RDS') %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>% 
+  left_join(., park_table, by = "UNIT_CODE") %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = as.character(list(unique(parametername))),
+            Assessment_Category = "Impaired",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  mutate(Impairments = gsub('"', "", Impairments)) %>%
+  mutate(Impairments = gsub("^c\\(|\\)$", "", Impairments)) %>%
+  ungroup() %>%
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_area_good <- readRDS('data/mid/attains_ws_areas.RDS') %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_area_impaired$assessmentunitidentifier) %>%
+  dplyr::filter(ircategory %in% c("1","2")) %>% 
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = "None",
+            Assessment_Category = "Good",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_area_unknown <- readRDS('data/mid/attains_ws_areas.RDS') %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_area_impaired$assessmentunitidentifier) %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_area_good$assessmentunitidentifier) %>%
+  dplyr::filter(ircategory %in% c("3")) %>%
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = "Unknown",
+            Assessment_Category = "Unknown",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_ws_areas <- bind_rows(park_area_impaired, park_area_good, park_area_unknown) %>%
+  filter(!Park %in% no_water$UNIT_NAME) %>%
+  sf::st_simplify(dTolerance = 0.001)
+saveRDS(park_ws_areas, 'shiny/data/ws_areas.RDS')
+
+# LINE #
+
+park_line_impaired <- readRDS('data/mid/attains_ws_lines.RDS') %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>% 
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = as.character(list(unique(parametername))),
+            Assessment_Category = "Impaired",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  mutate(Impairments = gsub('"', "", Impairments)) %>%
+  mutate(Impairments = gsub("^c\\(|\\)$", "", Impairments)) %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_line_good <- readRDS('data/mid/attains_ws_lines.RDS') %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_line_impaired$assessmentunitidentifier) %>%
+  dplyr::filter(ircategory %in% c("1","2")) %>% 
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = "None",
+            Assessment_Category = "Good",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_line_unknown <- readRDS('data/mid/attains_ws_lines.RDS') %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_line_impaired$assessmentunitidentifier) %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_line_good$assessmentunitidentifier) %>%
+  dplyr::filter(ircategory %in% c("3")) %>% 
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = "Unknown",
+            Assessment_Category = "Unknown",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_ws_lines <- bind_rows(park_line_impaired, park_line_good, park_line_unknown) %>%
+  filter(!Park %in% no_water$UNIT_NAME) %>%
+  sf::st_simplify(dTolerance = 0.001)
+saveRDS(park_ws_lines, 'shiny/data/ws_lines.RDS')
+
+# POINTS #
+
+park_point_impaired <- readRDS('data/mid/attains_ws_points.RDS') %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>%
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = as.character(list(unique(parametername))),
+            Assessment_Category = "Impaired",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  mutate(Impairments = gsub('"', "", Impairments)) %>%
+  mutate(Impairments = gsub("^c\\(|\\)$", "", Impairments)) %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_point_good <- readRDS('data/mid/attains_ws_points.RDS') %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_line_impaired$assessmentunitidentifier) %>%
+  dplyr::filter(ircategory %in% c("1","2")) %>% 
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = "None",
+            Assessment_Category = "Good",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_point_unknown <- readRDS('data/mid/attains_ws_points.RDS') %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_line_impaired$assessmentunitidentifier) %>%
+  dplyr::filter(!assessmentunitidentifier %in% park_line_good$assessmentunitidentifier) %>%
+  dplyr::filter(ircategory %in% c("3")) %>% 
+  left_join(st_drop_geometry(park_boundaries), by = "UNIT_CODE") %>%
+  #filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
+  group_by(assessmentunitidentifier, UNIT_NAME) %>%
+  summarize(Impairments = "Unknown",
+            Assessment_Category = "Unknown",
+            Link = as.character(list(unique(waterbodyreportlink.x)))) %>% 
+  left_join(colors, by = "Assessment_Category") %>%
+  select(Park = UNIT_NAME,
+         assessmentunitidentifier,
+         Assessment_Category,
+         Link,
+         Impairments,
+         col, 
+         dark_col) %>% 
+  st_transform(4326)
+
+park_ws_points <- bind_rows(park_point_impaired, park_point_good, park_point_unknown) %>%
+  filter(!Park %in% no_water$UNIT_NAME)
+saveRDS(park_ws_points, 'shiny/data/ws_points.RDS')
+
+all_the_watersheds <-  list.files('data/mid/park_outside/', full.names = TRUE) %>%
+  map(~readRDS(.)) %>%
+  bind_rows() %>%
+  st_transform(4269) %>%
+  #st_cast("POLYLINE") %>%
+  filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
+  select(Park = UNIT_NAME)
+saveRDS(all_the_watersheds, 'shiny/data/ws.RDS')
+```
+

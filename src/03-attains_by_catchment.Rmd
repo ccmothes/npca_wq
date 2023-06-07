@@ -1,0 +1,253 @@
+---
+title: "attains_park_stats"
+author: "Kathryn Willi"
+date: "2023-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse) # tidying
+library(sf) # geospatial analysis
+library(mapview) # for quickly viewing geospatial data
+
+#map(list.files('fxn', full.names = TRUE), source)
+
+sf::sf_use_s2(FALSE)
+
+# Load in park boundaries (from NPS IRMA)
+parks <- sf::st_read("data/nps_boundary.shp") %>%
+  # transform to the projection of the NHD:
+  sf::st_transform(4269)
+``` 
+
+Subset and clip all catchments and flowlines within park boundaries. This is done iteratively over individual HUC-4s, because the NHR-HR is VERY large and breaking it up speeds up processing time.
+
+```{r}
+# List of HUC-2s to map over:
+hucs <- rev(c("01","02","03","04","05","06","07","08","09","10",
+              "11","12","13","14","15","16","17","18","19","20",
+              "21","22"))
+
+figure_it_out <- function(hucs){
+  
+  # Where to find our HUC-4 datasets:
+  nhdhr <- paste0('data/in/nhdplushr/', hucs, "/")
+  files <- list.files(nhdhr, pattern = "GDB.gdb", full.names=TRUE)
+  
+  # Clip NHD-HR features within park units across individual HUC-4 files:
+  for(i in 2:length(files)){
+    catchments <- sf::st_read(dsn = files[i], layer = "NHDPlusCatchment")
+    
+    # filter out and clip the flowline features within the park boundaries:
+    catchments <- catchments %>% 
+      # filter out and clip the catchment features within the park boundaries:
+      sf::st_zm() %>%
+      sf::st_intersection(., parks)
+    # save it:
+    saveRDS(catchments, paste0("data/mid/nhdhr_parks/nhdhr_park_",
+                               "NHDPlusCatchment",
+                               "_",
+                               str_sub(files[i], 33, 36), 
+                               ".RDS"))
+    
+    # filter out and clip the flowline features within the park boundaries:
+    flowlines <- sf::st_read(dsn = files[i], layer = "NHDFlowline") %>%
+      sf::st_zm() %>%
+      # All flowlines have catchments, so this speeds it up:
+      dplyr::filter(NHDPlusID %in% catchments$NHDPlusID) %>%
+      sf::st_intersection(., parks)
+    saveRDS(flowlines, paste0("data/mid/nhdhr_parks/nhdhr_park_",
+                              "NHDFlowline",
+                              "_",
+                              str_sub(files[i], 33, 36),
+                              ".RDS"))
+    
+    # filter out and clip the waterbody features within the park boundaries:
+    waterbodies <- sf::st_read(dsn = files[i], layer = "NHDWaterbody") %>%
+      #st_cast("MULTIPOLYGON") %>%
+      sf::st_zm() %>%
+      sf::st_intersection(., parks)
+    saveRDS(waterbodies, paste0("data/mid/nhdhr_parks/nhdhr_park_",
+                                "NHDWaterbody",
+                                "_",
+                                str_sub(files[i], 33, 36),
+                                ".RDS"))
+    
+    # filter out and clip the area features within the park boundaries:
+    area <- sf::st_read(dsn = files[i], layer = "NHDArea") %>%
+      #st_cast("MULTIPOLYGON") %>%
+      sf::st_zm() %>%
+      sf::st_intersection(., parks)
+    saveRDS(area, paste0("data/mid/nhdhr_parks/nhdhr_park_",
+                         "NHDArea",
+                         "_",
+                         str_sub(files[i], 33, 36),
+                         ".RDS"))
+  }
+  
+  print(paste0("HUC-", hucs, " done!"))
+  
+}
+
+walk(hucs, figure_it_out)
+
+# Did any not work?
+
+no_dl <- list.files('data/mid/nhdhr_parks/') %>%
+  as_tibble() %>%
+  mutate(where=str_sub(value, -8, -5)) %>%
+  group_by(where) %>%
+  summarize(count = n())
+```
+
+```{r}
+projector <- function(nhdhr){
+  
+  feature <- readRDS(nhdhr) 
+  if(sf::st_crs(feature) != 3857) {feature <- feature %>% sf::st_transform(3857)}
+  return(feature)
+  
+} 
+
+# BIND TOGETHER
+
+# Catchments
+nhdhr_park_catch <- list.files("data/mid/nhdhr_parks/", 
+                               recursive = TRUE,
+                               pattern = "NHDPlusCatchment",
+                               full.names = TRUE) %>%
+  
+  map(~projector(.)) %>%
+  bind_rows() %>%
+  dplyr::select(UNIT_CODE,
+                nhdplusid = NHDPlusID) %>%
+  mutate(CATCH_TYPE = "NHDPlusHR")
+saveRDS(nhdhr_park_catch, 'data/mid/nhdhr_park_catch.RDS')
+
+# Flowlines
+nhdhr_park_flows <- list.files("data/mid/nhdhr_parks/", 
+                               pattern = "_NHDFlowline", 
+                               recursive = TRUE,
+                               full.names = TRUE) %>%
+  map(~projector(.)) %>%
+  bind_rows() %>%
+  # add feature meta data (includes waterbody intermittency)
+  left_join(., sf::st_read(dsn = "data/in/nhdplushr/01//NHDPLUS_H_0101_HU4_GDB.gdb",
+                           layer = "NHDFCode"), by = "FCode")
+saveRDS(nhdhr_park_flows, 'data/mid/nhdhr_park_flow.RDS')
+
+# Waterbodies
+nhdhr_park_waterbody <- list.files("data/mid/nhdhr_parks/", 
+                                   pattern = "NHDWaterbody", 
+                                   recursive = TRUE,
+                                   full.names = TRUE) %>%
+  map(~projector(.)) %>%
+  bind_rows() %>%
+  left_join(., sf::st_read(dsn = "data/in/nhdplushr/01//NHDPLUS_H_0101_HU4_GDB.gdb", 
+                           layer = "NHDFCode"), by = "FCode")
+saveRDS(nhdhr_park_waterbody, 'data/mid/nhdhr_park_waterbody.RDS')
+
+# Areas
+nhdhr_park_area <- list.files("data/mid/nhdhr_parks/", 
+                              pattern = "NHDArea", 
+                              recursive = TRUE,
+                              full.names = TRUE) %>%
+  map(~projector(.)) %>%
+  bind_rows() %>%
+  left_join(., sf::st_read(dsn = "data/in/nhdplushr/01//NHDPLUS_H_0101_HU4_GDB.gdb", layer = "NHDFCode"), 
+            by = "FCode")
+saveRDS(nhdhr_park_area, 'data/mid/nhdhr_park_area.RDS')
+```
+
+Sanity Check: did the upstream workflow work?
+```{r}
+test_join <- anti_join(parks, sf::st_drop_geometry(nhdhr_park_catch), by="UNIT_CODE")
+rm(test_join)
+# All in AK and VI, which checks out. Though, PEVI (Ohio) is in a weird NHD dead zone in Lake Erie...
+```
+
+There are some coastal/estuary/lake regions in parks that don't have catchments, similar to the problem identified at PEVI. So here I am just creating spatial features to represent these NHD catchment "dead zones" so we don't lose ATTAINS data that exists there:
+```{r}
+# make all the lil catchments into one big blob...
+nhdhr_park_catch_dissolve <- nhdhr_park_catch %>%
+  summarize()
+
+# ... to use as an "eraser" for creating polygons where catchments don't
+# exist in parks:
+empty_park_space <- parks %>%
+  sf::st_difference(., nhdhr_park_catch_dissolve) %>%
+  select(UNIT_CODE) %>%
+  mutate(CATCH_TYPE = "COASTAL")
+
+park_catch <- nhdhr_park_catch %>%
+  bind_rows(empty_park_space) 
+saveRDS(park_catch, 'data/mid/final_raw_catch.RDS')
+```
+
+Subset and clip the ATTAINS geospatial data to only include assessment units within NPS park boundaries.
+```{r}
+park_catch <- readRDS('data/mid/final_raw_catch.RDS') %>%
+  sf::st_make_valid(.)
+
+npca_regions <- sf::st_read("data/in/npca_regions.shp") 
+
+parks <- sf::st_read("data/in/nps_boundary.shp") 
+
+# Load in all raw geospatial ATTAINS data:
+attains_areas <- readRDS('data/mid/attains_au_areas.RDS') 
+
+attains_lines <- readRDS('data/mid/attains_au_lines.RDS')
+
+attains_points <- readRDS('data/mid/attains_au_points.RDS')
+
+# Load in ATTAINS water quality standard parameter data:
+attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
+
+# Load in CIP-like list of appropriately attributed ATTAINS/catchment combos:
+right_dims_areas <- readRDS('data/mid/right_dims_areas.RDS')
+
+right_dims_lines <- readRDS('data/mid/right_dims_lines.RDS')
+
+# subset area features
+nps_attains_areas <- attains_areas %>% 
+  subsetATTAINS(layer = ., sub_by = park_catch, type = "area") %>%
+  mutate(assessment_type = "AREA") %>%
+  inner_join(., right_dims_areas, by = c("nhdplusid","assessmentunitidentifier"))
+
+# subset line features
+nps_attains_lines <- attains_lines %>%
+  subsetATTAINS(layer = ., sub_by = park_catch, type = "line") %>%
+  mutate(assessment_type = "LINE") %>%
+  inner_join(., right_dims_lines, by = c("nhdplusid","assessmentunitidentifier"))
+
+# subset point features (simple, no thresholds/clipping needed)
+nps_attains_points <- attains_points %>%
+  subsetATTAINS(layer = ., sub_by = park_catch, type = "point") %>%
+  mutate(assessment_type = "POINT")
+
+# this represents all assessment units (areal, point, linear) that are physically within the park boundaries
+# as a data frame
+nps_all_attains <- bind_rows(nps_attains_areas, nps_attains_lines, nps_attains_points) %>%
+    as_tibble(.) %>%
+    dplyr::left_join(.,
+                     # remove duplicate/unnecessary columns:
+                     dplyr::select(attains_assmnt_parms, -c(assmnt_joinkey, organizationid, submissionid, orgtype, tas303d, reportingcycle, waterbodyreportlink, GLOBALID)),
+                     by = "assessmentunitidentifier", multiple = "all")
+saveRDS(nps_all_attains, 'data/mid/nps_attains_catchment_table.RDS')
+
+# Next link all of this information to our park catchment layer so it can be geospatially represented:
+nps_attains_to_catchment <- park_catch %>%
+  as_tibble(.) %>%
+  dplyr::left_join(nps_all_attains,
+                   by = c("nhdplusid", "UNIT_CODE"), multiple = "all") %>%
+  dplyr::mutate(attains = ifelse(is.na(assessmentunitidentifier), "NO ATTAINS DATA", "ATTAINS DATA")) %>%
+  sf::st_as_sf(.)
+
+nps_attains_to_catchment$catchment_area_fin <- sf::st_area(nps_attains_to_catchment, by_element = TRUE)
+
+saveRDS(nps_attains_to_catchment, 'data/mid/nps_attains_catchment_geospatial.RDS')
+```

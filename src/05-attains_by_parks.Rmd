@@ -1,0 +1,360 @@
+---
+title: "attains_catchment_stats"
+author: "Kathryn Willi"
+date: "2023-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Getting the data
+
+Load in necessary datasets:
+```{r}
+library(tidyverse)
+library(sf)
+
+map(list.files('fxn', full.names = TRUE), source)
+
+# Load in park boundaries:
+parks <- st_read("data/in/nps_boundary.shp")
+
+# Load in NPCA regions
+npca_regions <- st_read("data/in/npca_regions.shp") 
+
+# Load in all geospatial ATTAINS data:
+attains_areas <- readRDS('data/mid/attains_au_areas.RDS')
+
+attains_lines <- readRDS('data/mid/attains_au_lines.RDS')
+
+attains_points <- readRDS('data/mid/attains_au_points.RDS')
+
+# Load in ATTAINS water quality standard parameter data:
+attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
+```
+
+Subset and clip the ATTAINS geospatial data to only include assessment units within NPS Park Boundaries.
+```{r}
+nps_attains_areas <- attains_areas %>% 
+  subsetATTAINS(layer = ., sub_by = parks, type = "area") %>%
+  mutate(assessment_type = "AREA") 
+saveRDS(nps_attains_areas,'data/mid/nps_attains_park_area.RDS')
+
+nps_attains_lines <- attains_lines %>%
+  subsetATTAINS(layer = ., sub_by = parks, type = "line") %>%
+  mutate(assessment_type = "LINE")
+saveRDS(nps_attains_lines,'data/mid/nps_attains_park_line.RDS')
+
+nps_attains_points <- attains_points %>%
+  subsetATTAINS(layer = ., sub_by = parks, type = "point") %>%
+  mutate(assessment_type = "POINT")
+saveRDS(nps_attains_points,'data/mid/nps_attains_park_point.RDS')
+
+# this represents all assessment units (areal, point, linear) that are physically within the park boundaries
+nps_all_attains <- bind_rows(as_tibble(nps_attains_areas), as_tibble(nps_attains_lines), as_tibble(nps_attains_points)) %>%
+  as_tibble(.) %>%
+  # join to assessment unit parameter data:
+  dplyr::left_join(.,
+                   # remove duplicate/unnecessary columns:
+                   dplyr::select(attains_assmnt_parms, -c(assmnt_joinkey, organizationid, submissionid, orgtype, tas303d, reportingcycle, waterbodyreportlink, GLOBALID)),
+                   by = "assessmentunitidentifier", multiple = "all")
+
+# Lastly remove all data linked to parks without water features in them (CONTUS only):
+no_water <- parks %>%
+  # cannot include these states in this exercise as they don't have nhd hr in them to begin with:
+  filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
+  # this is a weird lil park in the Middle of Lake Erie:
+  filter(UNIT_CODE != "PEVI") %>%
+  # clipped water features from the NHD HR:
+  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_area.RDS')$UNIT_CODE) %>%
+  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_flow.RDS')$UNIT_CODE) %>%
+  filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_waterbody.RDS')$UNIT_CODE) %>%
+  # table developed by NPS that lists parks without water (by unit name):
+  bind_rows(filter(parks, UNIT_NAME %in% read_csv('data/in/no_water_parks.csv')$UNIT_NAME)) %>%
+  distinct(UNIT_NAME, .keep_all = TRUE) %>%
+  mutate(hydro = "No Water Features")
+
+nps_all_attains <- nps_all_attains %>%
+  filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
+  bind_rows(no_water)
+
+saveRDS(nps_all_attains, 'data/out/nps_all_wq_data_final.RDS')
+```
+
+# Exploring the data
+```{r}
+nps_all_attains <- readRDS('data/out/nps_all_wq_data_final.RDS')
+
+colors <- data.frame(
+  overallstatus = c("Not Supporting", "Fully Supporting", "Not Assessed", NA),
+  col = c("#DC851E", "#059FA4", "#A1A522", "#C2CAD7"),
+  Priority = c(1, 2, 3, 4)
+)
+
+# making the USA "pretty":
+prettier <- USA.state.boundaries::state_boundaries_wgs84 %>% filter(NAME %in% c("Hawaii", "Michigan") & TYPE == "Land") %>%
+  st_transform(3857) %>%
+  mutate(geometry = Shape)
+states <- tigris::states(resolution = "5m") %>% filter(!NAME %in% c("Michigan", "Hawaii")) %>%
+  st_transform(3857) %>%
+  bind_rows(prettier) %>%
+  usa_mapper()
+rm(prettier)
+
+parks_mapper <- parks %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  distinct(UNIT_CODE, .keep_all = TRUE) %>%
+  usa_mapper()
+
+parks <- parks %>%
+  st_join(., npca_regions)
+```
+
+Impaired Parks
+```{r}
+nps_all_attains <- nps_all_attains %>%
+  left_join(colors, by = "overallstatus")
+
+# how many parks have impairments?
+count <- nps_all_attains %>% 
+  dplyr::filter(ircategory %in% c("5A","5","4C","4B", "4A")) %>%
+  distinct(UNIT_CODE) %>% nrow()
+
+# out of the total number of parks
+n_distinct(parks$UNIT_CODE)
+
+# how many with impairments on the 303d list?
+nps_all_attains %>% filter(parametercategorycode %in% c("5A","5")) %>%
+  distinct(UNIT_CODE, .keep_all = TRUE) %>% nrow()
+
+# where are the impaired parks?
+impaired_parks <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  distinct(UNIT_CODE, .keep_all =TRUE)
+
+impaired_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% impaired_parks$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = impaired_mapper, fill ="#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/impaired_parks.jpg')
+```
+
+Common impairments
+```{r}
+# What impairments are the most common across park units?
+top_impairments <- nps_all_attains %>% 
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>%
+  distinct(UNIT_CODE, parametergroupname) %>%
+  group_by(parametergroupname) %>%
+  summarize(count = n())
+
+pathogens <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  dplyr::filter(parametergroupname == "PATHOGENS") %>%
+  distinct(UNIT_CODE, .keep_all =TRUE)
+pathogen_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% pathogens$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+mercury <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  dplyr::filter(parametergroupname == "MERCURY") %>%
+  distinct(UNIT_CODE, .keep_all =TRUE)
+mercury_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% mercury$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+metals <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  dplyr::filter(parametergroupname == "METALS (OTHER THAN MERCURY)") %>%
+  distinct(UNIT_CODE, .keep_all =TRUE)
+metals_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% metals$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+nutrients <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  dplyr::filter(parametergroupname == "NUTRIENTS") %>%
+  distinct(UNIT_CODE, .keep_all =TRUE)
+nutrients_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% nutrients$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+do <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  dplyr::filter(parametergroupname == "ORGANIC ENRICHMENT/OXYGEN DEPLETION") %>%
+  distinct(UNIT_CODE, .keep_all =TRUE)
+do_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% do$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+pcbs <- nps_all_attains %>%
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
+  dplyr::filter(parametergroupname == "POLYCHLORINATED BIPHENYLS (PCBS)") %>%
+  distinct(UNIT_CODE, .keep_all =TRUE)
+pcbs_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% pcbs$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = pathogen_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/pathogens.jpg')
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = mercury_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/mercury.jpg')
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = metals_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/metals.jpg')
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = nutrients_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/nutrients.jpg')
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = do_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/do.jpg')
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = pcbs_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/pcbs.jpg')
+```
+
+Impairments by NPCA Region
+```{r}
+# What impairments are the most common across regions?
+top_npca_impairments <- nps_all_attains %>% 
+  dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B","4A")) %>%
+  distinct(UNIT_CODE, office, parametergroupname) %>%
+  group_by(office, parametergroupname) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  arrange(desc(count)) %>% 
+  group_by(office) %>%
+  slice(1:5)
+```
+
+
+Which parks have no water quality data?
+```{r}
+no_data <- parks %>% 
+  anti_join(., nps_all_attains, by = "UNIT_CODE") %>%
+  distinct(UNIT_CODE, .keep_all = TRUE) 
+no_data_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% no_data$UNIT_CODE) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = no_data_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21) 
+ggsave('data/out/figs/no_data.jpg')
+```
+
+Which parks have ORWs?
+```{r}
+no_hydro <- nps_all_attains %>%
+  dplyr::filter(!is.na(hydro))
+
+park_table <- parks %>%
+  st_drop_geometry() %>%
+  distinct(UNIT_CODE)
+
+any <- readRDS('data/mid/parks_with_orw.RDS') %>%
+  inner_join(park_table, by = c("unit_code" = "UNIT_CODE")) %>%
+  distinct(unit_code)
+
+none <- park_table %>%
+  anti_join(., any, by = c("UNIT_CODE" = "unit_code")) %>%
+  # don't include parks without water in the count:
+  dplyr::filter(!UNIT_CODE %in% no_hydro$UNIT_CODE)
+
+orw <- readRDS('data/mid/parks_with_orw.RDS') %>%
+  inner_join(park_table, by = c("unit_code"="UNIT_CODE")) %>%
+  distinct(unit_code, Tier) %>%
+  dplyr::filter(Tier == "Tier 2.5")
+
+onrw <- readRDS('data/mid/parks_with_orw.RDS') %>%
+  inner_join(park_table, by = c("unit_code"="UNIT_CODE")) %>%
+  distinct(unit_code,Tier) %>%
+  dplyr::filter(Tier == "Tier 3")
+
+both <- readRDS('data/mid/parks_with_orw.RDS') %>%
+  inner_join(park_table, by = c("unit_code" = "UNIT_CODE")) %>%
+  distinct(unit_code, Tier) %>%
+  group_by(unit_code) %>%
+  summarize(count = n()) %>%
+  dplyr::filter(count > 1)
+
+orw_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% orw$unit_code) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+onrw_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% onrw$unit_code) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+both_mapper <- parks %>%
+  dplyr::filter(UNIT_CODE %in% both$unit_code) %>%
+  st_centroid() %>%
+  st_join(st_transform(tigris::states(), 3857)) %>%
+  usa_mapper()
+
+ggplot() +
+  theme_void() +
+  geom_sf(data = states, fill = NA) +
+  geom_sf(data = parks_mapper, color = "#C2CAD7") + 
+  geom_sf(data = orw_mapper, fill = "#A1A522", color = "black", size = 3, pch = 21) +
+  geom_sf(data = onrw_mapper, fill = "#059FA4", color = "black", size = 3, pch = 21) +
+  geom_sf(data = both_mapper, fill = "#DC851E", color = "black", size = 3, pch = 21)
+ggsave('data/out/figs/orws.jpg')
+```
+

@@ -1,9 +1,15 @@
-subsetATTAINSpark <- function(layer, type, path = 'data/'){
+# parks or catchments
+
+subsetATTAINS <- function(layer, sub_by = parks,  type){
   
-    # find all ATTAINS features within NPS boundaries
+    # if(exists("parks") == FALSE) {parks <- getParkUnits(projection = 3857)}
+    
+  # find all ATTAINS features within NPS boundaries
     nps_attains <- layer %>%
       .[parks,] 
     
+    print("Only ATTAINS in parks")
+
     # get the raw ATTAINS area's area (m^2)...
     try(nps_attains$area_area <- sf::st_area(nps_attains, by_element = TRUE))
     
@@ -12,7 +18,7 @@ subsetATTAINSpark <- function(layer, type, path = 'data/'){
     
     # cut out ("clip") ATTAINS data within park units - remove all else
     nps_attains <- nps_attains %>%
-      sf::st_intersection(., dplyr::select(parks, UNIT_CODE))
+      sf::st_intersection(., sub_by)
     
     # get the area (m^2) of the area within the park unit...
     try(nps_attains$in_park_area_area <- sf::st_area(nps_attains, by_element = TRUE))
@@ -23,9 +29,13 @@ subsetATTAINSpark <- function(layer, type, path = 'data/'){
     # transform ATTAINS points into "POINT" features
     if(type == "point") {nps_attains <- nps_attains %>% sf::st_cast(., "POINT")}
     
-    # Save as RDS + shapefile
-    saveRDS(nps_attains, paste0(path, '/00_nps_attains_park_', type, '.RDS'))
-    sf::st_write(dplyr::select(nps_attains, UNIT_CODE, assessmentunitidentifier), paste0(path, '/00_nps_attains_park_', type, '.shp'), append = FALSE)
+    nps_attains <- nps_attains %>%
+      sf::st_join(., npca_regions, left = TRUE) %>%
+      # weird coastal points
+      mutate(office = ifelse(is.na(office) & state =="TX", "Texas",
+                      ifelse(is.na(office) & state =="MN", "Midwest", office)))
+    
+    print(paste0(type, " complete!"))
     
     return(nps_attains)
     

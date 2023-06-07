@@ -1,0 +1,94 @@
+---
+title: "Finding ATTAINS Weirds (CIP-lite)"
+author: "Katie Willi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+```
+
+Identifying appropriate catchment-assessment unit combinations
+```{r}
+# Load in park boundaries (from NPS IRMA)
+parks <- sf::st_read("data/in/nps_boundary.shp")
+
+# List of HUC-2s to map over:
+hucs <- (c("01","02","03","04","05","06","07","08","09","10",
+           "11","12","13","14","15","16","17","18","19","20",
+           "21","22"))
+
+park_areas <- readRDS('data/mid/attains_au_areas.RDS') %>%
+  .[parks,] %>%
+  st_transform(4269) 
+
+park_lines <- readRDS('data/mid/attains_au_lines.RDS') %>%
+  .[parks,] %>%
+  st_transform(4269)
+
+## Total length and areas:
+park_areas$total_area <- sf::st_area(park_areas, by_element = TRUE)
+park_lines$total_length <- sf::st_length(park_lines, by_element = TRUE)
+
+find_the_baddies <- function(hucs){
+  
+  # Where to find our HUC-4 datasets:
+  nhdhr <- paste0('data/in/nhdplushr/', hucs, "/")
+  
+  files <- list.files(nhdhr, pattern = "GDB.gdb", full.names=TRUE)
+  
+  # Clip NHD-HR features within park units across individual HUC-4 files:
+  for(i in 1:length(files)){
+    
+    # filter out and clip the flowline features within the park boundaries:
+    catchments <- sf::st_read(dsn = files[i], layer = "NHDPlusCatchment")
+    catchments$square_meters <- sf::st_area(catchments, by_element = TRUE)
+    
+    try(areas <- park_areas %>%
+          st_intersection(., catchments) %>%
+          select(nhdplusid = NHDPlusID, total_area, assessmentunitidentifier, square_meters))
+    try(areas$catchment_area <- sf::st_area(areas, by_element = TRUE))
+    
+    
+    try(lines <- park_lines %>%
+          st_intersection(.,catchments) %>%
+          select(nhdplusid = NHDPlusID, total_length, assessmentunitidentifier, square_meters))
+    try(lines$catchment_length <- sf::st_length(lines, by_element = TRUE))
+    
+    
+    # save it:
+    try(saveRDS(st_drop_geometry(lines), paste0("data/mid/catchment_au_test/lines_",
+                                                str_sub(files[i], 33, 36), 
+                                                ".RDS")))
+    
+    try(saveRDS(st_drop_geometry(areas), paste0("data/mid/catchment_au_test/areas_",
+                                                str_sub(files[i], 33, 36), 
+                                                ".RDS")))
+  }
+  
+  print(paste0("HUC-", hucs, " done!"))
+  
+}
+
+walk(hucs, find_the_baddies)
+
+right_dims_lines <- list.files('data/mid/catchment_au_test/', pattern = "lines", full.names = TRUE) %>%
+  map(~readRDS(.)) %>%
+  bind_rows() %>%
+  # remove line features from catchments that have less than 30 meters within:
+  filter(as.numeric(catchment_length) >= 30) 
+saveRDS(right_dims_lines, 'data/mid/right_dims_lines.RDS')
+
+
+
+right_dims_areas <- list.files('data/mid/catchment_au_test/', pattern = "areas", full.names = TRUE) %>%
+  map(~readRDS(.)) %>%
+  bind_rows() %>%
+           # catchments must containat least 1% of the total area of the assessment unit:
+  filter(((as.numeric(catchment_area)/as.numeric(total_area)) >= 0.01) | 
+           # or, the assessment unit covers at least 50% of the catchment:
+           as.numeric(catchment_area) >= (as.numeric(square_meters)*.5))
+saveRDS(right_dims_areas, 'data/mid/right_dims_areas.RDS')
