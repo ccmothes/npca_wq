@@ -13,9 +13,11 @@ library(shinyBS)
 sf::sf_use_s2(FALSE)
 
 boundary_lines <- readRDS('shiny/data/nps_boundary_lines.RDS') 
+states <- readRDS('shiny/data/states.RDS')
+
 
 # Catchment boundaries
-inside <- readRDS('shiny/data/for_app.RDS') 
+inside <- readRDS('shiny/data/catch.RDS') 
 
 # ATTAINS
 lines <- readRDS('shiny/data/lines.RDS') 
@@ -25,7 +27,7 @@ points <- readRDS('shiny/data/points.RDS')
 attains_data <- readRDS('shiny/data/attains_table.RDS')
 
 #Tier 2.5 and Tier 3 Waters
-orw <- readRDS('shiny/data/orw.RDS')
+orw <- readRDS('shiny/data/orw_.RDS')
 
 # For park mapper
 nps_points <- readRDS('shiny/data/nps_points.RDS')
@@ -127,15 +129,25 @@ server <- function(input, output, session) {
     
   })
   
+  filtered_states <- reactive({
+    
+    states <- filter(states, STUSPS %in% filtered_impairment()$State)
+    
+    states
+    
+  })
+  
+  
   output$plot1 <- renderPlot({
-    validate (need(nrow(insider()) > 0, message = "No impairment(s) selected."))
+    validate (need(nrow(filtered_impairment()) > 0, message = "No impairment(s) selected."))
     pie <- nps_points %>%
       st_drop_geometry() %>%
       mutate(baddies = ifelse(Park %in% filtered_impairment()$Park, "Impaired", "Not Impaired")) %>%
       group_by(baddies) %>%
+      distinct(Park, .keep_all = TRUE) %>%
       dplyr::summarize(count=n())
     pie <- pie %>%
-      mutate(prop = count/sum(count)) %>%  
+      mutate(prop = count/351) %>%  
       mutate(ypos = cumsum(prop) - 0.5*prop) %>%
       mutate(legend = paste0(baddies, " (", scales::percent(prop, accuracy=0.01), ")"))
     
@@ -189,7 +201,14 @@ server <- function(input, output, session) {
       clearMarkers() %>%
       clearShapes() %>%
       fitBounds(lng1 =  c0()[1], lat1 = c0()[2], lng2 =  c0()[3], lat2 = c0()[4]) %>%
-      
+      # based on NPCA feedback - want to make sure states where impairments exist are represented-ish. Think APPA; if impaired, 
+      # want a way of showing where it exists
+      addPolylines(
+        data = filtered_states(),
+        fillColor = "",
+        fillOpacity = 1,
+        color = "#04FFF7",
+        weight = 2) %>%
       addCircles(
         data = nps_points,
         fill = "#C2CAD7",
@@ -321,6 +340,24 @@ server <- function(input, output, session) {
     
   })
   
+  
+  # observeEvent(input$table_rows_selected, {
+  #   selectedRow <- input$table_rows_selected
+  #   output$selectedRow <- renderPring(selectedRow)
+  #   
+  #   selected <- reactive({input$updatedData_rows_selected})
+  #   
+  #   if (!is.null(selectedRow)){
+  #     try(selectedFeature1 <- filter(liner(), assessmentunitidentifier == selectedRow$Assessment_Code))
+  #     try(selectedFeature2 <- filter(areaer(), assessmentunitidentifier == selectedRow$Assessment_Code))
+  #     try(selectedFeature3 <- filter(pointer(), assessmentunitidentifier == selectedRow$Assessment_Code))
+  #   }
+  #   
+  #   
+  #   
+  # })
+  
+  
   output$plot2 <- renderPlot({
     validate (need(nrow(insider()) > 0, message = "No catchment data currently available at this park unit."))
     pie <- insider() %>%
@@ -380,6 +417,7 @@ server <- function(input, output, session) {
     leafletProxy('map2') %>% 
       clearMarkers() %>%
       clearShapes() %>%
+      clearImages() %>%
       fitBounds(lng1 =  c1()[1], lat1 = c1()[2], lng2 =  c1()[3], lat2 = c1()[4]) %>%
       
       addPolylines(
@@ -513,7 +551,21 @@ server <- function(input, output, session) {
                        "<br>",
                        "Impairments: ", ws_pointer()$Impairments,
                        "<br>",
-                       "URL: ", ws_pointer()$Link))
+                       "URL: ", ws_pointer()$Link)) #%>%
+    #   addPolygons(
+    #     data = selectedFeature2,
+    #     fillColor = areaer()$col,
+    #     fillOpacity = 0.55,
+    #     color = '#04FFF7',
+    #     weight = 2) %>%
+    #   addPolylines(data = selectedFeature1,
+    #                fillColor = '#04FFF7',
+    #                color = '#04FFF7',
+    #                weight = 4.5) %>%
+    # addCircles(data = selectedFeature3, 
+    #            fill = "#04FFF7",
+    #            color = '#04FFF7',
+    #            fillOpacity = 0.5)
     
   })
   
@@ -521,8 +573,10 @@ server <- function(input, output, session) {
     validate (need(nrow(filtered_data()) > 0, message="No ATTAINS data in this park unit."))
     tableee <- filtered_data()
     tableee$URL <- paste0('<a  target=_blank href=', tableee$URL, '>', tableee$URL,'</a>' )
-    DT::datatable(tableee , escape = FALSE, options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))},
+    DT::datatable(tableee , selection = 'single', escape = FALSE, options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))},
     options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))
+  
+  
   
   
   # Create a .csv of selected data for download.
