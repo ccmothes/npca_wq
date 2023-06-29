@@ -99,31 +99,61 @@ unzip(temp1, exdir = "data/in/ATTAINS")
 # The ATTAINS catchment layer is huge and takes forever to load. Here I'm converting in to an RDS file which saves a huge amount of time when needing
 # to load it in to your environment (why is this? . Doing the same for other layers for consistency:
 
-attains_catchments <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+attains_catchments <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
                                   layer = "attains_au_catchments")
 saveRDS(attains_catchments, 'data/mid/attains_au_catchments.RDS')
 
-attains_areas <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                             layer = "attains_au_areas")
-saveRDS(attains_areas, 'data/mid/attains_au_areas.RDS')
+# We found that geospatial representations of nearly all assessment units in the states of Virginia, Minnesota, and Pennsylvania were dropped
+# in the most recent version on ATTAINS. Here, I am adding those geospatial reps from an older ATTAINS version, and flagging them:
 
-attains_lines <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                             layer = "attains_au_lines")
-saveRDS(attains_lines, 'data/mid/attains_au_lines.RDS')
+attains_areas <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
+                             layer = "attains_au_areas") %>%
+  mutate(time = "CURRENT")
 
-attains_points <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                              layer = "attains_au_points")
-saveRDS(attains_points, 'data/mid/attains_au_points.RDS')
+full_attains_areas <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+                             layer = "attains_au_areas") %>%
+  mutate(time = "2022") %>%
+  filter(!assessmentunitidentifier %in% attains_areas$assessmentunitidentifier) %>%
+  bind_rows(attains_areas) 
+saveRDS(full_attains_areas, 'data/mid/attains_au_areas_.RDS')
 
-attains_assmnt_parms <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+# We found that geospatial representations of nearly all assessment units in the states of Virginia, Minnesota, and Pennsylvania were dropped
+# in the most recent version on ATTAINS. Here, I am adding those geospatial reps from an older ATTAINS version, and flagging them:
+
+attains_lines <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
+                             layer = "attains_au_lines") %>%
+  mutate(time = "CURRENT")
+
+full_attains_lines <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+                             layer = "attains_au_lines") %>%
+  mutate(time = "2022") %>%
+  filter(!assessmentunitidentifier %in% attains_lines$assessmentunitidentifier) %>%
+  bind_rows(attains_lines) 
+saveRDS(full_attains_lines, 'data/mid/attains_au_lines_.RDS')
+
+# We found that geospatial representations of nearly all assessment units in the states of Virginia, Minnesota, and Pennsylvania were dropped
+# in the most recent version on ATTAINS. Here, I am adding those geospatial reps from an older ATTAINS version, and flagging them:
+
+attains_points <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
+                             layer = "attains_au_points") %>%
+  mutate(time = "CURRENT")
+
+full_attains_points <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+                             layer = "attains_au_points") %>%
+  mutate(time = "2022") %>%
+  filter(!assessmentunitidentifier %in% attains_points$assessmentunitidentifier) %>%
+  bind_rows(attains_points) 
+saveRDS(full_attains_points, 'data/mid/attains_au_points_.RDS')
+
+attains_assmnt_parms <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
                                     layer = "attains_au_assmnt_parms")
 saveRDS(attains_assmnt_parms, 'data/mid/attains_au_assmnt_parms.RDS')
 
-attains_attributes <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+attains_attributes <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
                                   layer = "attains_au_attributes")
 saveRDS(attains_attributes, 'data/mid/attains_au_attributes.RDS')
 
-attains_meta <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
+attains_meta <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
                             layer = "attains_au_meta")
 saveRDS(attains_meta, 'data/mid/attains_au_meta.RDS')
 ```
