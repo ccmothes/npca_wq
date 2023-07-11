@@ -41,6 +41,7 @@ nhd_areas <- readRDS('shiny/data/map_areas.RDS')
 ws_lines <-readRDS('shiny/data/ws_lines.RDS')
 ws_areas <-readRDS('shiny/data/ws_areas.RDS')
 ws_points <- readRDS('shiny/data/ws_points.RDS')
+ws <- readRDS('shiny/data/ws.RDS')
 
 ui <- navbarPage("National Park Service Water Quality",
                  
@@ -207,7 +208,7 @@ server <- function(input, output, session) {
         data = filtered_states(),
         fillColor = "",
         fillOpacity = 1,
-        color = "#04FFF7",
+        color = "#059FA4",
         weight = 2) %>%
       addCircles(
         data = nps_points,
@@ -324,6 +325,14 @@ server <- function(input, output, session) {
 
   })
   
+  watersheder <- reactive({
+    
+    ws <- filter(ws, Park == input$park)
+    
+    ws
+    
+  })
+  
   insider <- reactive({
     
     inside <- filter(inside, Park == input$park)
@@ -426,6 +435,14 @@ server <- function(input, output, session) {
         fillOpacity = 1,
         color = "black",
         weight = 2) %>%
+      
+      addPolylines(
+        data = watersheder(),
+        group = "Upstream ATTAINS",
+        fillColor = "",
+        fillOpacity = 1,
+        color = "black",
+        weight = 1) %>%
       
       addPolylines(
         data = nhd_liner(),

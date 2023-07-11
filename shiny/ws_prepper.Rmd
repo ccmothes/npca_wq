@@ -194,7 +194,8 @@ summed <- list.files('data/mid/park_ws_shapes_100km/', full.names = TRUE) %>%
 saveRDS(summed,'data/mid/all_nps_watersheds_100km.RDS')
 
 mini <- summed %>% 
-  sf::st_simplify(dTolerance = 0.001)
+  sf::st_simplify(dTolerance = 0.001) %>%
+  st_cast("MULTILINESTRING")
 saveRDS(mini,'shiny/data/ws.RDS')
 ```
 
