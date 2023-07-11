@@ -349,7 +349,7 @@ server <- function(input, output, session) {
     
   })
   
-  
+  # code for selecting/highlighting... broken/half-baked
   # observeEvent(input$table_rows_selected, {
   #   selectedRow <- input$table_rows_selected
   #   output$selectedRow <- renderPring(selectedRow)
