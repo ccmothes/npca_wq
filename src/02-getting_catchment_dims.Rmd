@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
+sf_use_s2(FALSE)
 ```
 
 Identifying appropriate catchment-assessment unit combinations
@@ -80,15 +81,16 @@ right_dims_lines <- list.files('data/mid/catchment_au_test/', pattern = "lines",
   bind_rows() %>%
   # remove line features from catchments that have less than 30 meters within:
   filter(as.numeric(catchment_length) >= 30) 
-saveRDS(right_dims_lines, 'data/mid/right_dims_lines.RDS')
+saveRDS(right_dims_lines, 'data/mid/right_dims_lines_.RDS')
 
 
 
 right_dims_areas <- list.files('data/mid/catchment_au_test/', pattern = "areas", full.names = TRUE) %>%
   map(~readRDS(.)) %>%
   bind_rows() %>%
-           # catchments must containat least 1% of the total area of the assessment unit:
+  # catchments must containat least 1% of the total area of the assessment unit:
   filter(((as.numeric(catchment_area)/as.numeric(total_area)) >= 0.01) | 
            # or, the assessment unit covers at least 50% of the catchment:
            as.numeric(catchment_area) >= (as.numeric(square_meters)*.5))
-saveRDS(right_dims_areas, 'data/mid/right_dims_areas.RDS')
+saveRDS(right_dims_areas, 'data/mid/right_dims_areas_.RDS')
+```

@@ -14,12 +14,12 @@ library(tidyverse) # tidying
 library(sf) # geospatial analysis
 library(mapview) # for quickly viewing geospatial data
 
-#map(list.files('fxn', full.names = TRUE), source)
+map(list.files('fxn', full.names = TRUE), source)
 
 sf::sf_use_s2(FALSE)
 
 # Load in park boundaries (from NPS IRMA)
-parks <- sf::st_read("data/nps_boundary.shp") %>%
+parks <- sf::st_read("data/in/nps_boundary.shp") %>%
   # transform to the projection of the NHD:
   sf::st_transform(4269)
 ``` 
@@ -39,7 +39,7 @@ figure_it_out <- function(hucs){
   files <- list.files(nhdhr, pattern = "GDB.gdb", full.names=TRUE)
   
   # Clip NHD-HR features within park units across individual HUC-4 files:
-  for(i in 2:length(files)){
+  for(i in 1:length(files)){
     catchments <- sf::st_read(dsn = files[i], layer = "NHDPlusCatchment")
     
     # filter out and clip the flowline features within the park boundaries:
@@ -208,9 +208,9 @@ attains_points <- readRDS('data/mid/attains_au_points.RDS')
 attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
 
 # Load in CIP-like list of appropriately attributed ATTAINS/catchment combos:
-right_dims_areas <- readRDS('data/mid/right_dims_areas.RDS')
+right_dims_areas <- readRDS('data/mid/right_dims_areas_.RDS')
 
-right_dims_lines <- readRDS('data/mid/right_dims_lines.RDS')
+right_dims_lines <- readRDS('data/mid/right_dims_lines_.RDS')
 
 # subset area features
 nps_attains_areas <- attains_areas %>% 
@@ -237,7 +237,7 @@ nps_all_attains <- bind_rows(nps_attains_areas, nps_attains_lines, nps_attains_p
                      # remove duplicate/unnecessary columns:
                      dplyr::select(attains_assmnt_parms, -c(assmnt_joinkey, organizationid, submissionid, orgtype, tas303d, reportingcycle, waterbodyreportlink, GLOBALID)),
                      by = "assessmentunitidentifier", multiple = "all")
-saveRDS(nps_all_attains, 'data/mid/nps_attains_catchment_table.RDS')
+saveRDS(nps_all_attains, 'data/mid/nps_attains_catchment_table_.RDS')
 
 # Next link all of this information to our park catchment layer so it can be geospatially represented:
 nps_attains_to_catchment <- park_catch %>%
@@ -249,5 +249,5 @@ nps_attains_to_catchment <- park_catch %>%
 
 nps_attains_to_catchment$catchment_area_fin <- sf::st_area(nps_attains_to_catchment, by_element = TRUE)
 
-saveRDS(nps_attains_to_catchment, 'data/mid/nps_attains_catchment_geospatial.RDS')
+saveRDS(nps_attains_to_catchment, 'data/mid/nps_attains_catchment_geospatial_.RDS')
 ```

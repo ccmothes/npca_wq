@@ -40,17 +40,17 @@ Subset and clip the ATTAINS geospatial data to only include assessment units wit
 nps_attains_areas <- attains_areas %>% 
   subsetATTAINS(layer = ., sub_by = parks, type = "area") %>%
   mutate(assessment_type = "AREA") 
-saveRDS(nps_attains_areas,'data/mid/nps_attains_park_area.RDS')
+saveRDS(nps_attains_areas,'data/mid/nps_attains_park_area_.RDS')
 
 nps_attains_lines <- attains_lines %>%
   subsetATTAINS(layer = ., sub_by = parks, type = "line") %>%
   mutate(assessment_type = "LINE")
-saveRDS(nps_attains_lines,'data/mid/nps_attains_park_line.RDS')
+saveRDS(nps_attains_lines,'data/mid/nps_attains_park_line_.RDS')
 
 nps_attains_points <- attains_points %>%
   subsetATTAINS(layer = ., sub_by = parks, type = "point") %>%
   mutate(assessment_type = "POINT")
-saveRDS(nps_attains_points,'data/mid/nps_attains_park_point.RDS')
+saveRDS(nps_attains_points,'data/mid/nps_attains_park_point_.RDS')
 
 # this represents all assessment units (areal, point, linear) that are physically within the park boundaries
 nps_all_attains <- bind_rows(as_tibble(nps_attains_areas), as_tibble(nps_attains_lines), as_tibble(nps_attains_points)) %>%
@@ -80,12 +80,12 @@ nps_all_attains <- nps_all_attains %>%
   filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
   bind_rows(no_water)
 
-saveRDS(nps_all_attains, 'data/out/nps_all_wq_data_final.RDS')
+saveRDS(nps_all_attains, 'data/out/nps_all_wq_data_final_.RDS')
 ```
 
 # Exploring the data
 ```{r}
-nps_all_attains <- readRDS('data/out/nps_all_wq_data_final.RDS')
+nps_all_attains <- readRDS('data/out/nps_all_wq_data_final_.RDS')
 
 colors <- data.frame(
   overallstatus = c("Not Supporting", "Fully Supporting", "Not Assessed", NA),
@@ -116,15 +116,17 @@ parks <- parks %>%
 Impaired Parks
 ```{r}
 nps_all_attains <- nps_all_attains %>%
-  left_join(colors, by = "overallstatus")
+  left_join(colors, by = "overallstatus") %>%
+  dplyr::filter(is.na(hydro))
 
 # how many parks have impairments?
 count <- nps_all_attains %>% 
   dplyr::filter(ircategory %in% c("5A","5","4C","4B", "4A")) %>%
   distinct(UNIT_CODE) %>% nrow()
 
-# out of the total number of parks
-n_distinct(parks$UNIT_CODE)
+total_w_water <- parks %>%
+  distinct(UNIT_CODE) %>%
+  filter(!UNIT_CODE %in% no_water$UNIT_CODE)
 
 # how many with impairments on the 303d list?
 nps_all_attains %>% filter(parametercategorycode %in% c("5A","5")) %>%
@@ -133,11 +135,12 @@ nps_all_attains %>% filter(parametercategorycode %in% c("5A","5")) %>%
 # where are the impaired parks?
 impaired_parks <- nps_all_attains %>%
   dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>% 
-  distinct(UNIT_CODE, .keep_all =TRUE)
+  distinct(UNIT_CODE, .keep_all = TRUE)
 
 impaired_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% impaired_parks$UNIT_CODE) %>%
   st_centroid() %>%
+  distinct(UNIT_CODE, .keep_all = TRUE) %>%
   st_join(st_transform(tigris::states(), 3857)) %>%
   usa_mapper()
 
@@ -165,6 +168,7 @@ pathogens <- nps_all_attains %>%
 pathogen_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% pathogens$UNIT_CODE) %>%
   st_centroid() %>%
+  distinct(UNIT_CODE, .keep_all =TRUE) %>%
   st_join(st_transform(tigris::states(), 3857)) %>%
   usa_mapper()
 
@@ -175,6 +179,7 @@ mercury <- nps_all_attains %>%
 mercury_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% mercury$UNIT_CODE) %>%
   st_centroid() %>%
+  distinct(UNIT_CODE, .keep_all =TRUE) %>%
   st_join(st_transform(tigris::states(), 3857)) %>%
   usa_mapper()
 
@@ -185,6 +190,7 @@ metals <- nps_all_attains %>%
 metals_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% metals$UNIT_CODE) %>%
   st_centroid() %>%
+  distinct(UNIT_CODE, .keep_all =TRUE) %>%
   st_join(st_transform(tigris::states(), 3857)) %>%
   usa_mapper()
 
@@ -195,6 +201,7 @@ nutrients <- nps_all_attains %>%
 nutrients_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% nutrients$UNIT_CODE) %>%
   st_centroid() %>%
+  distinct(UNIT_CODE, .keep_all =TRUE) %>%
   st_join(st_transform(tigris::states(), 3857)) %>%
   usa_mapper()
 
@@ -205,6 +212,7 @@ do <- nps_all_attains %>%
 do_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% do$UNIT_CODE) %>%
   st_centroid() %>%
+  distinct(UNIT_CODE, .keep_all =TRUE) %>%
   st_join(st_transform(tigris::states(), 3857)) %>%
   usa_mapper()
 
@@ -272,7 +280,7 @@ top_npca_impairments <- nps_all_attains %>%
   ungroup() %>%
   arrange(desc(count)) %>% 
   group_by(office) %>%
-  slice(1:5)
+  slice(1:10)
 ```
 
 
@@ -280,6 +288,7 @@ Which parks have no water quality data?
 ```{r}
 no_data <- parks %>% 
   anti_join(., nps_all_attains, by = "UNIT_CODE") %>%
+  filter(!UNIT_CODE %in% no_water$UNIT_CODE) %>% 
   distinct(UNIT_CODE, .keep_all = TRUE) 
 no_data_mapper <- parks %>%
   dplyr::filter(UNIT_CODE %in% no_data$UNIT_CODE) %>%
@@ -297,22 +306,20 @@ ggsave('data/out/figs/no_data.jpg')
 
 Which parks have ORWs?
 ```{r}
-no_hydro <- nps_all_attains %>%
-  dplyr::filter(!is.na(hydro))
-
 park_table <- parks %>%
   st_drop_geometry() %>%
   distinct(UNIT_CODE)
 
 any <- readRDS('data/mid/parks_with_orw.RDS') %>%
   inner_join(park_table, by = c("unit_code" = "UNIT_CODE")) %>%
-  distinct(unit_code)
+  distinct(unit_code) %>%
+  filter(!unit_code %in% no_water$UNIT_CODE)
 
 none <- park_table %>%
   anti_join(., any, by = c("UNIT_CODE" = "unit_code")) %>%
   # don't include parks without water in the count:
-  dplyr::filter(!UNIT_CODE %in% no_hydro$UNIT_CODE)
-
+  dplyr::filter(!UNIT_CODE %in% no_water$UNIT_CODE)
+276/351
 orw <- readRDS('data/mid/parks_with_orw.RDS') %>%
   inner_join(park_table, by = c("unit_code"="UNIT_CODE")) %>%
   distinct(unit_code, Tier) %>%
