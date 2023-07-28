@@ -7,3 +7,5 @@ data/
 data
 shiny/data/
 shiny/data
+.DS_Store
+**/.DS_Store
