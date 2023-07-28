@@ -1,0 +1,91 @@
+---
+title: "park_geospatial_data"
+author: "Katie Willi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Produces a list of all relevant AOIs for querying water quality data portals for each park unit, as well as a 10 km radius around each park unit:
+
+```{r}
+library(tidyverse)
+library(sf)
+library(tigris)
+
+options(tigris_use_cache = TRUE)
+
+parks <- st_read('data/in/nps_boundary.shp')
+parks_buf <- parks %>%
+  # 10 km buffer:
+  sf::st_buffer(dist = 10000)
+park_list <- unique(parks$UNIT_CODE) 
+# Remove the Appalachian Trail from the list. It's too big.
+park_list <- park_list[! park_list %in% c("MAPR","APPA")]
+states <- tigris::states()
+counties <- tigris::counties()
+
+geo_grabber <- function(park_list){
+  
+  parks <- filter(parks_buf, UNIT_CODE %in% park_list) %>%
+    st_transform(4269) %>%
+    group_by(UNIT_CODE) %>%      
+    summarize()
+  
+  state <- states %>%
+    .[parks,] 
+  
+  county <- counties %>%
+    .[parks,] %>%
+    select(NAMELSAD, STATEFP) %>% 
+    left_join(st_drop_geometry(states), by = "STATEFP") %>%
+    select(NAME, NAMELSAD, STATEFP) %>% 
+    mutate(NAME = paste0(NAMELSAD, ", ", NAME),
+           TYPE = "COUNTY") %>%
+    select(NAME, TYPE) %>%
+    st_drop_geometry()
+  
+  places <- tigris::places(state = unique(state$STUSPS), filter_by = parks) %>% 
+    select(NAMELSAD, STATEFP) %>% 
+    left_join(st_drop_geometry(states), by = "STATEFP") %>%
+    select(NAME, NAMELSAD, STATEFP) %>% 
+    mutate(NAME = paste0(NAMELSAD, ", ", NAME),
+           TYPE = "PLACE") %>%
+    select(NAME, TYPE) %>%
+    st_drop_geometry()
+  
+  huc12 <- nhdplusTools::get_huc(AOI = parks, type = "huc12") %>% 
+    mutate(TYPE = "HUC12") %>%
+    select(NAME = huc12,
+           TYPE) %>%
+    st_drop_geometry()
+  
+  zipcode <- tigris::zctas(filter_by = parks) %>% 
+    select(NAME = 1) %>%
+    mutate(TYPE = "ZIPCODE") %>%
+    st_drop_geometry()
+  
+  bbox <- st_bbox(parks) %>% as_tibble() %>%
+    mutate(TYPE = c("bbox:xmin", "bbox:ymin", "bbox:xmax", "bbox:ymax")) %>%
+    rename(NAME = x) %>%
+    mutate(NAME = as.character(NAME)) %>%
+    st_drop_geometry()
+  
+  print(paste0(parks$UNIT_CODE, " done!"))
+  
+  me <- rbind(places, county, huc12, zipcode, bbox) %>%
+    mutate(UNIT_CODE = unique(parks$UNIT_CODE)) 
+  # back up
+  write_csv(me, paste0('data/mid/aoi/', parks$UNIT_CODE, '.csv'))
+  return(me)
+  
+}
+park_list %>%
+  map(~geo_grabber(.)) %>%
+  bind_rows() %>%
+  write_csv('data/out/NPS_AOIs.csv')
+```
+
