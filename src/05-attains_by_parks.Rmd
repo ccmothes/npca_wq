@@ -16,7 +16,7 @@ Load in necessary datasets:
 library(tidyverse)
 library(sf)
 
-map(list.files('fxn', full.names = TRUE), source)
+map(list.files('src/fxn', full.names = TRUE), source)
 
 # Load in park boundaries:
 parks <- st_read("data/in/nps_boundary.shp")
