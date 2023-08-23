@@ -514,7 +514,13 @@ server <- function(input, output, session) {
                        "<br>",
                        "Impairments: ", liner()$Impairments,
                        "<br>",
-                       "URL: ", liner()$Link)) %>%
+                       "URL: ", liner()$Link),
+        highlightOptions = highlightOptions(
+          color = "yellow",
+          opacity = 1,
+          weight = 3,
+          bringToFront = TRUE
+        )) %>%
       addCircles(
         data = pointer(),
         fill = pointer()$col,
