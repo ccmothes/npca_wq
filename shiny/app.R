@@ -234,11 +234,18 @@ server <- function(input, output, session) {
   })
   
   filtered_data <- reactive({
-    
     # Filter data based on selected Park Unit.
-    if(!isTruthy(input$park)){attains_data<-filter(attains_data,Park=="Bogus")
-    }else{
-      attains_data <- filter(attains_data, Park == input$park)
+    if (!isTruthy(input$park)) {
+      attains_data <- filter(attains_data, Park == "Bogus")
+    } else{
+      attains_data <- filter(attains_data, Park == input$park) %>%
+        #edit URL column to hyperlink in datatable
+        mutate(URL =
+                 paste0('<a  target=_blank href=',
+                        URL,
+                        '>',
+                        URL,
+                        '</a>'))
     }
     
     attains_data
@@ -483,13 +490,20 @@ server <- function(input, output, session) {
         fillOpacity = 0.55,
         color = "black",
         weight = 2,
+        layerId = areaer()$assessmentunitidentifier,
         popup = paste0("Status: ", areaer()$Assessment_Category,
                        "<br>",
                        "State ID: ", areaer()$assessmentunitidentifier,
                        "<br>",
                        "Impairments: ", areaer()$Impairments,
                        "<br>",
-                       "URL: ", areaer()$Link)) %>%
+                       "URL: ", areaer()$Link),
+        highlightOptions = highlightOptions(
+          color = "yellow",
+          opacity = 1,
+          weight = 3,
+          bringToFront = TRUE
+        )) %>%
       addPolylines(
         data = orwer(),
         fillColor = "#00714a",
@@ -508,6 +522,7 @@ server <- function(input, output, session) {
         fillOpacity = 1,
         color = liner()$dark_col,
         weight = 4.5,
+        layerId = liner()$assessmentunitidentifier,
         popup = paste0("Status: ", liner()$Assessment_Category,
                        "<br>",
                        "State ID: ", liner()$assessmentunitidentifier,
@@ -593,13 +608,46 @@ server <- function(input, output, session) {
   })
   
   output$table <- DT::renderDataTable({
-    validate (need(nrow(filtered_data()) > 0, message="No ATTAINS data in this park unit."))
-    tableee <- filtered_data()
-    tableee$URL <- paste0('<a  target=_blank href=', tableee$URL, '>', tableee$URL,'</a>' )
-    DT::datatable(tableee , selection = 'single', escape = FALSE, options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))},
-    options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))
+    validate (need(nrow(filtered_data()) > 0, message = "No ATTAINS data in this park unit."))
+    # tableee <- filtered_data()
+    # tableee$URL <-
+    #   paste0('<a  target=_blank href=',
+    #          tableee$URL,
+    #          '>',
+    #          tableee$URL,
+    #          '</a>')
+    DT::datatable(
+      filtered_data() ,
+      selection = 'single',
+      escape = FALSE,
+      options = list(
+        autoWidth = TRUE,
+        scrollX = TRUE,
+        scrollY = "400px",
+        scrollCollapse = TRUE
+      )
+    )
+  },
+  options = list(
+    autoWidth = TRUE,
+    scrollX = TRUE,
+    scrollY = "400px",
+    scrollCollapse = TRUE
+  ))
   
-  
+  # Table proxy for highlighting and sorting map selection
+  observeEvent(input$map2_shape_click, {
+    
+    # get selected row
+    selected_row <- which(filtered_data()$Assessment_Code %in% input$map2_shape_click$id)
+    
+    # calculate new row order
+    row_order <- c(selected_row:nrow(filtered_data()), 1:(selected_row - 1))
+    
+    DT::dataTableProxy("table") %>%
+      replaceData(filtered_data()[row_order,]) %>% 
+      selectRows(1)
+  })
   
   
   # Create a .csv of selected data for download.
