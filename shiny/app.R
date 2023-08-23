@@ -12,36 +12,36 @@ library(shinyBS)
 
 sf::sf_use_s2(FALSE)
 
-boundary_lines <- readRDS('shiny/data/nps_boundary_lines.RDS') 
-states <- readRDS('shiny/data/states.RDS')
+boundary_lines <- readRDS('data/nps_boundary_lines.RDS') 
+states <- readRDS('data/states.RDS')
 
 
 # Catchment boundaries
-inside <- readRDS('shiny/data/catch.RDS') 
+inside <- readRDS('data/catch.RDS') 
 
 # ATTAINS
-lines <- readRDS('shiny/data/lines.RDS') 
-areas <- readRDS('shiny/data/areas.RDS')
-points <- readRDS('shiny/data/points.RDS')
+lines <- readRDS('data/lines.RDS') 
+areas <- readRDS('data/areas.RDS')
+points <- readRDS('data/points.RDS')
 # Download Table
-attains_data <- readRDS('shiny/data/attains_table.RDS')
+attains_data <- readRDS('data/attains_table.RDS')
 
 #Tier 2.5 and Tier 3 Waters
-orw <- readRDS('shiny/data/orw_.RDS')
+orw <- readRDS('data/orw_.RDS')
 
 # For park mapper
-nps_points <- readRDS('shiny/data/nps_points.RDS')
+nps_points <- readRDS('data/nps_points.RDS')
 
 # NHD
-nhd_lines <- readRDS('shiny/data/map_flowlines.RDS')
-nhd_waterbodies <- readRDS('shiny/data/map_waterbodies.RDS')
-nhd_areas <- readRDS('shiny/data/map_areas.RDS')
+nhd_lines <- readRDS('data/map_flowlines.RDS')
+nhd_waterbodies <- readRDS('data/map_waterbodies.RDS')
+nhd_areas <- readRDS('data/map_areas.RDS')
 
 #ATTAINS Watershed
-ws_lines <-readRDS('shiny/data/ws_lines.RDS')
-ws_areas <-readRDS('shiny/data/ws_areas.RDS')
-ws_points <- readRDS('shiny/data/ws_points.RDS')
-ws <- readRDS('shiny/data/ws.RDS')
+ws_lines <-readRDS('data/ws_lines.RDS')
+ws_areas <-readRDS('data/ws_areas.RDS')
+ws_points <- readRDS('data/ws_points.RDS')
+ws <- readRDS('data/ws.RDS')
 
 ui <- navbarPage("National Park Service Water Quality",
                  
