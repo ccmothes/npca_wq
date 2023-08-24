@@ -49,10 +49,11 @@ ui <- navbarPage("National Park Service Water Quality",
                           
                           fluidPage(
                             fluidRow(
+                              br(),
                               column(3, 
-                                     h6("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
-              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database. The pie chart plots the fraction of park units impaired by the selected water quality
-              parameter(s). When selecting impairments, only parks with ALL selected impairments will be displayed."),
+                                     h4("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
+              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database."),
+              hr(),
               fluidRow(pickerInput(
                 inputId = "impairment", 
                 label = "Select Impairments:",
@@ -66,13 +67,21 @@ ui <- navbarPage("National Park Service Water Quality",
                                   "CAUSE UNKNOWN - FISH KILLS","CHLORINE")),
                 selected = c("PATHOGENS"),
                 options = list('actions-box' = TRUE),
-                multiple = TRUE)),
+                multiple = TRUE),
+               em("When selecting impairments, only parks with ALL selected impairments will be displayed."),
+               br(),
+               br(),
+
+               strong("Fraction of all park units impaired by the selected water quality
+                parameter(s):")
+               
+              ),
               
               fluidRow(plotOutput("plot1"))),
               column(9,
-                     h6(""),
-                     h6(""),
                      br(),
+                     # increase height of map relative to window size
+                     tags$style(type = "text/css", "#map1 {height: calc(100vh - 80px) !important;}"),
                      leafletOutput("map1"), height = "100%")))),
               
               
@@ -156,9 +165,12 @@ server <- function(input, output, session) {
       geom_bar(stat="identity", width=1, color="white") +
       coord_polar("y", start=0) +
       scale_fill_manual(values=c("#813B00","#C2CAD7")) +
-      guides(fill=guide_legend(title="")) +
       theme_void() + # remove background, grid, numeric label
-      theme(text = element_text(size = 20)) 
+      theme(text = element_text(size = 20),
+            legend.position = "bottom",
+            plot.margin = unit(c(0,0,0,0), "mm"))+
+      guides(fill=guide_legend(title="", nrow = 2))
+      
   })
   
   #  generarte the map object 
@@ -166,7 +178,7 @@ server <- function(input, output, session) {
     leaflet(options = leafletOptions(minZoom = 4)) %>%
       setView(lng = -105.07592352501446, 
               lat = 40.59085658003177, 
-              zoom = 6) %>%
+              zoom = 7) %>%
       addProviderTiles("CartoDB.Positron", group = "CartoDB.Positron") #%>%
     # addLayersControl(
     #   # baseGroups = c("OpenStreetMap", "Light"),
