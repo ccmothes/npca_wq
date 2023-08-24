@@ -89,10 +89,10 @@ ui <- navbarPage("National Park Service Water Quality",
                        
                        fluidPage(
                          fluidRow(
+                           br(),
                            column(3, 
-                                  h6("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
-              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database. The pie chart plots water quality status by catchment 
-              area for a general assessment of how much of a particular park is assessed by their state water quality management agency."),
+                                  h4("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
+              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database."),
               fluidRow(pickerInput(
                 inputId = "park", 
                 label = "Select National Park:",
@@ -100,17 +100,20 @@ ui <- navbarPage("National Park Service Water Quality",
                 selected = "Gauley River National Recreation Area",
                 options = list('actions-box' = TRUE),
                 multiple = FALSE)),
-              fluidRow(plotOutput("plot2"),
-                       #br(),
-                       downloadButton("downloadData", "Download Selected Data")
+              br(),
+              fluidRow(
+                plotOutput("plot2"),
+                br(),
+                br(),
+                downloadButton("downloadData", "Download Selected Data")
               )),
               
               column(9,
-                     h6(""),
-                     h6(""),
                      br(),
-                     leafletOutput("map2"), height = "100%")),
-              br(),
+                     # increase height of map relative to window size
+                     tags$style(type = "text/css", "#map2 {height: calc(100vh - 80px) !important;}"),
+                     leafletOutput("map2"))),
+              #br(),
               fluidRow(class = "table",
                        # Table
                        dataTableOutput("table"))))
@@ -404,9 +407,13 @@ server <- function(input, output, session) {
       geom_bar(stat="identity", width=1, color="white") +
       coord_polar("y", start=0) +
       scale_fill_manual(values=pie$col) +
-      guides(fill=guide_legend(title="Status by Catchment Area")) +
       theme_void() + # remove background, grid, numeric label
-      theme(text = element_text(size = 20)) 
+      theme(text = element_text(size = 20),
+            plot.margin = unit(c(0,0,0,0), "mm"),
+            legend.position = "bottom") +
+      guides(fill=guide_legend(title="Status by Catchment Area", title.position = "top",
+                               nrow=5))
+      
   })
   
   #  generarte the map object 
@@ -447,7 +454,7 @@ server <- function(input, output, session) {
       clearShapes() %>%
       clearImages() %>%
       fitBounds(lng1 =  c1()[1], lat1 = c1()[2], lng2 =  c1()[3], lat2 = c1()[4]) %>%
-      
+
       addPolylines(
         data = boundary_liner(),
         fillColor = "",
