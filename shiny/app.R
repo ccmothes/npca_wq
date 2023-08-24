@@ -82,7 +82,7 @@ ui <- navbarPage("National Park Service Water Quality",
                      br(),
                      # increase height of map relative to window size
                      tags$style(type = "text/css", "#map1 {height: calc(100vh - 80px) !important;}"),
-                     leafletOutput("map1"), height = "100%")))),
+                     leafletOutput("map1"))))),
               
               
               tabPanel("Explore by Park",
@@ -93,6 +93,7 @@ ui <- navbarPage("National Park Service Water Quality",
                            column(3, 
                                   h4("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
               The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database."),
+              hr(),
               fluidRow(pickerInput(
                 inputId = "park", 
                 label = "Select National Park:",
@@ -113,7 +114,7 @@ ui <- navbarPage("National Park Service Water Quality",
                      # increase height of map relative to window size
                      tags$style(type = "text/css", "#map2 {height: calc(100vh - 80px) !important;}"),
                      leafletOutput("map2"))),
-              #br(),
+              br(),
               fluidRow(class = "table",
                        # Table
                        dataTableOutput("table"))))
@@ -561,13 +562,20 @@ server <- function(input, output, session) {
         color = "black",
         fillOpacity = 0.5,
         group = "ATTAINS",
+        layerId = pointer()$assessmentunitidentifier,
         popup = paste0("Status: ", pointer()$Assessment_Category,
                        "<br>",
                        "State ID: ", pointer()$assessmentunitidentifier,
                        "<br>",
                        "Impairments: ", pointer()$Impairments,
                        "<br>",
-                       "URL: ", pointer()$Link)) %>%
+                       "URL: ", pointer()$Link),
+        highlightOptions = highlightOptions(
+          color = "yellow",
+          opacity = 1,
+          weight = 3,
+          bringToFront = TRUE
+        )) %>%
       addPolygons(
         data = ws_areaer(),
         fillColor = ws_areaer()$col,
@@ -657,15 +665,18 @@ server <- function(input, output, session) {
   # Table proxy for highlighting and sorting map selection
   observeEvent(input$map2_shape_click, {
     
-    # get selected row
-    selected_row <- which(filtered_data()$Assessment_Code %in% input$map2_shape_click$id)
-    
-    # calculate new row order
-    row_order <- c(selected_row:nrow(filtered_data()), 1:(selected_row - 1))
-    
-    DT::dataTableProxy("table") %>%
-      replaceData(filtered_data()[row_order,]) %>% 
-      selectRows(1)
+    if(!is.null(input$map2_shape_click$id)) {
+      # get selected row
+      selected_row <- which(filtered_data()$Assessment_Code %in% input$map2_shape_click$id)
+      
+      # calculate new row order
+      row_order <- c(selected_row:nrow(filtered_data()), 1:(selected_row - 1))
+      
+      DT::dataTableProxy("table") %>%
+        replaceData(filtered_data()[row_order,]) %>% 
+        selectRows(1)
+      
+    }
   })
   
   
