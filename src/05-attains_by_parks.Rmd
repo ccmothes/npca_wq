@@ -67,7 +67,7 @@ no_water <- parks %>%
   filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
   # this is a weird lil park in the Middle of Lake Erie:
   filter(UNIT_CODE != "PEVI") %>%
-  # clipped water features from the NHD HR:
+  # clipped water features from the NHD HR within park units:
   filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_area.RDS')$UNIT_CODE) %>%
   filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_flow.RDS')$UNIT_CODE) %>%
   filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_waterbody.RDS')$UNIT_CODE) %>%

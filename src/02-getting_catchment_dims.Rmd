@@ -1,5 +1,5 @@
 ---
-title: "Finding ATTAINS Weirds (CIP-lite)"
+title: "02 - Finding ATTAINS weirdos ('CIP-lite')"
 author: "Katie Willi"
 date: "`r Sys.Date()`"
 output: html_document
@@ -12,7 +12,12 @@ library(sf)
 sf_use_s2(FALSE)
 ```
 
-Identifying appropriate catchment-assessment unit combinations
+NHD HR catchments are used as the foundation for linking the ATTAINS geospatial features to waters within the National Park Service System for use in our Shiny app (whose development is the last step in the workflow). Furthermore, the ATTAINS database is working towards aggregating their assessment unit data to the NHDPlus HR catchment layer as a means of standardizing across states, providing additional justification for implementing our visualization approach.
+
+Here, we link each ATTAINS assessment unit's geospatial layer with its associated NHDPlus HR catchments. Catchments that did not contain any ATTAINS features, but still included a NHDPlus HR water feature, are considered unassessed. For consistency with the [ATTAINS catchment indexing approach](https://www.epa.gov/waterdata/integrated-reporting-georeferencing-pilot-report), we also considered catchments unassessed if they only contained pieces of a line-type assessment unit that was less than 30 meters in length. For additional consistency with the ATTAINS indexing approach, we considered catchments unassessed if they only contained a piece of a polygon assessment unit whose area within that catchment accounted for less that 1% of its total area, or if the polygon assessment unit covered less that 50% of the catchment.
+
+#### Identifying appropriate catchment-assessment unit combinations:
+
 ```{r}
 # Load in park boundaries (from NPS IRMA)
 parks <- sf::st_read("data/in/nps_boundary.shp")
@@ -22,11 +27,11 @@ hucs <- (c("01","02","03","04","05","06","07","08","09","10",
            "11","12","13","14","15","16","17","18","19","20",
            "21","22"))
 
-park_areas <- readRDS('data/mid/attains_au_areas.RDS') %>%
+park_areas <- readRDS('data/mid/attains_au_areas_.RDS') %>%
   .[parks,] %>%
   st_transform(4269) 
 
-park_lines <- readRDS('data/mid/attains_au_lines.RDS') %>%
+park_lines <- readRDS('data/mid/attains_au_lines_.RDS') %>%
   .[parks,] %>%
   st_transform(4269)
 
@@ -88,7 +93,7 @@ saveRDS(right_dims_lines, 'data/mid/right_dims_lines_.RDS')
 right_dims_areas <- list.files('data/mid/catchment_au_test/', pattern = "areas", full.names = TRUE) %>%
   map(~readRDS(.)) %>%
   bind_rows() %>%
-  # catchments must containat least 1% of the total area of the assessment unit:
+  # catchments must contain at least 1% of the total area of the assessment unit:
   filter(((as.numeric(catchment_area)/as.numeric(total_area)) >= 0.01) | 
            # or, the assessment unit covers at least 50% of the catchment:
            as.numeric(catchment_area) >= (as.numeric(square_meters)*.5))

@@ -1,17 +1,22 @@
 ---
-title: "downloading_data"
-author: "Katie Willi"
+title: "01 - Downloading Data"
+author: "ROSSyndicate"
 date: "`r Sys.Date()`"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(tigris)
+library(nhdplusTools)
 library(tidyverse)
 library(sf)
 ```
 
-Download park boundary data from NPS.gov:
+This is the workflow for pulling in all data sets that we will need for assessing the water quality status of waters in the National Park Service (NPS) System. This requires downloading NPS park boundaries, [the EPA's ATTAINS database](https://www.epa.gov/waterdata/attains), the National Hydrography Dataset (both High Resoultion and PlusV2), and creating a state-based NPCA regional boundary layer.
+
+#### Download park boundary data from NPS.gov:
+
 ```{r}
 #pull resource ID using reference ID of the park boundaries landing page
 downloadLink <- httr::GET(paste0("https://irmaservices.nps.gov/datastore/v4/rest", "/Reference/2296705/DigitalFiles")) %>% 
@@ -35,6 +40,7 @@ park_table <- sf::st_read(dsn = temp2) %>%
   summarize(names = as.character(list(unique(UNIT_NAME))),
             states = as.character(list(unique(STATE))),
             count = n()) %>%
+  # For parks that are both a park and a preserve (and have the same NPS unit code), lump them together for the purposes of this analysis:
   mutate(UNIT_NAME = ifelse(UNIT_CODE == "ANIA", "Aniakchak National Monument and Preserve",
                      ifelse(UNIT_CODE == "DENA", "Denali National Park and Preserve",
                      ifelse(UNIT_CODE == "GAAR", "Gates of the Arctic National Park and Preserve",
@@ -42,9 +48,9 @@ park_table <- sf::st_read(dsn = temp2) %>%
                      ifelse(UNIT_CODE == "GRSA", "Great Sand Dunes National Park and Preserve",
                      ifelse(UNIT_CODE == "KATM", "Katmai National Park and Preserve",
                      ifelse(UNIT_CODE == "LACL", "Lake Clark National Park and Preserve",
-                     ifelse(UNIT_CODE == "SAGU", "Santa Monica Mountains National Park and Recreation Area",
+                     ifelse(UNIT_CODE == "SAMO", "Santa Monica Mountains National Park and Recreation Area",
                      ifelse(UNIT_CODE == "WRST", "Wrangell-St. Elias National Park and Preserve", names))))))))),     
-         STATE = ifelse(UNIT_CODE == "SAGU", "CA", states)) %>%
+         STATE = ifelse(UNIT_CODE == "SAGU", "AZ", states)) %>%
   select(UNIT_CODE, UNIT_NAME, STATE)
 
 parks <- sf::st_read(dsn = temp2) %>%
@@ -56,30 +62,33 @@ parks <- sf::st_read(dsn = temp2) %>%
   sf::st_write('data/in/nps_boundary.shp')
 ```
 
-Make NPCA regional boundaries layer:
+#### Make an NPCA regional boundaries layer:
+
 ```{r}
-npca_regions <-  tibble::tibble(state = c("AK",
-                                          "DE", "DC", "MD", "PA", "VA", "WV",
-                                          "IL", "IN", "IA", "KS", "NE", "OH", "MI", "MN", "MO", "SD", "WI",
-                                          "CT", "ME", "NH", "NJ", "NY", "MA", "RI", "VT",
-                                          "ID", "MT", "ND", "WY",
-                                          "OR", "WA",
-                                          "AS", "CA", "HI", "NV", "GU",
-                                          "AL", "AR", "GA", "KY", "NC", "MS", "SC", "TN",
-                                          "AZ", "CO", "NM", "UT",
-                                          "FL", "LA", "PR", "VI",
-                                          "TX", "OK"),
-                                office = c("Alaska",
-                                           "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic",
-                                           "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest",
-                                           "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast",
-                                           "Northern Rockies", "Northern Rockies", "Northern Rockies", "Northern Rockies",
-                                           "Northwest", "Northwest",
-                                           "Pacific", "Pacific", "Pacific", "Pacific", "Pacific",
-                                           "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast",
-                                           "Southwest", "Southwest", "Southwest", "Southwest",
-                                           "Suncoast", "Suncoast", "Suncoast", "Suncoast",
-                                           "Texas", "Texas"))
+npca_regions <- tibble(
+  state = c("AK",
+            "DE", "DC", "MD", "PA", "VA", "WV",
+            "IL", "IN", "IA", "KS", "NE", "OH", "MI", "MN", "MO", "SD", "WI",
+            "CT", "ME", "NH", "NJ", "NY", "MA", "RI", "VT",
+            "ID", "MT", "ND", "WY",
+            "OR", "WA",
+            "AS", "CA", "HI", "NV", "GU",
+            "AL", "AR", "GA", "KY", "NC", "MS", "SC", "TN",
+            "AZ", "CO", "NM", "UT",
+            "FL", "LA", "PR", "VI",
+            "TX", "OK"),
+  
+  office = c("Alaska",
+             "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic", "Mid-Atlantic",
+             "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest", "Midwest",
+             "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast", "Northeast",
+             "Northern Rockies", "Northern Rockies", "Northern Rockies", "Northern Rockies",
+             "Northwest", "Northwest",
+             "Pacific", "Pacific", "Pacific", "Pacific", "Pacific",
+             "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast", "Southeast",
+             "Southwest", "Southwest", "Southwest", "Southwest",
+             "Suncoast", "Suncoast", "Suncoast", "Suncoast",
+             "Texas", "Texas"))
 
 npca_regions <- tigris::states() %>%
   sf::st_transform(3857) %>%
@@ -90,7 +99,8 @@ npca_regions <- tigris::states() %>%
   sf::st_write('data/in/npca_regions.shp')
 ```
 
-Download ATTAINS database from the EPA:
+#### Download ATTAINS database from the EPA:
+
 ```{r}
 temp1 <- tempfile()
 download.file(paste0("https://dmap-data-commons-ow.s3.amazonaws.com/data/ATTAINS_Assessment_20230416_gpkg.zip"), destfile = temp1, method = "curl")
@@ -111,7 +121,7 @@ attains_areas <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TR
   mutate(time = "CURRENT")
 
 full_attains_areas <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                             layer = "attains_au_areas") %>%
+                                  layer = "attains_au_areas") %>%
   mutate(time = "2022") %>%
   filter(!assessmentunitidentifier %in% attains_areas$assessmentunitidentifier) %>%
   bind_rows(attains_areas) 
@@ -125,7 +135,7 @@ attains_lines <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TR
   mutate(time = "CURRENT")
 
 full_attains_lines <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                             layer = "attains_au_lines") %>%
+                                  layer = "attains_au_lines") %>%
   mutate(time = "2022") %>%
   filter(!assessmentunitidentifier %in% attains_lines$assessmentunitidentifier) %>%
   bind_rows(attains_lines) 
@@ -135,11 +145,11 @@ saveRDS(full_attains_lines, 'data/mid/attains_au_lines_.RDS')
 # in the most recent version on ATTAINS. Here, I am adding those geospatial reps from an older ATTAINS version, and flagging them:
 
 attains_points <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[2],
-                             layer = "attains_au_points") %>%
+                              layer = "attains_au_points") %>%
   mutate(time = "CURRENT")
 
 full_attains_points <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRUE)[1],
-                             layer = "attains_au_points") %>%
+                                   layer = "attains_au_points") %>%
   mutate(time = "2022") %>%
   filter(!assessmentunitidentifier %in% attains_points$assessmentunitidentifier) %>%
   bind_rows(attains_points) 
@@ -158,7 +168,8 @@ attains_meta <- sf::st_read(dsn = list.files("data/in/ATTAINS", full.names = TRU
 saveRDS(attains_meta, 'data/mid/attains_au_meta.RDS')
 ```
 
-Download NHD High Resolution data (for linking ATTAINS to geospatial features in park boundaries:
+#### Download NHD High Resolution data (for linking ATTAINS to geospatial features in park boundaries):
+
 ```{r}
 contus <- summarize(tigris::states())
 
@@ -173,15 +184,22 @@ for(i in 1:length(hucs)){
 }
 
 # Did all the hucs download?
-hucs_test <- as_tibble(sort(c("0104","0106","0107","0108","0202","0415","1501","1407","1502","1505","1503","1506","0317","0315","0603","1102","1402",
-                              "1401","1403","1405","1406","1404","1301","1408","1019","1018","0204","0314","0310","0308","0307","0309","0306","0313","2001",
-                              "2002","2006","2005","2201","0602","0512","0404","0514","0708","0706","1107","0604","1026","1029","1027","0513","0511","0510",
-                              "1103","0402","0405","0406","0806","0801","0410","0318","0316","0505","0305","0304","0601","0302","0303","0301","1011","1013",
-                              "1006","1017","1015","1606","1809","1602","0203","1024","1302","1504","1108","1305","1306","1104","0412","0414","0110","0411",
-                              "0506","0504","0508","0509","0207","0502","0208","1908","1101","0804","1111","1807","1805","1801","1804","1806","1802","1803",
-                              "1704","1706","0713","0714","0809","0808","0803","0805","1114","0109","0206","0102","0103","0105","0904","1002","1701","1008",
-                              "1007","1003","1113","1710","1707","1708","1709","2101","1012","1016","1109","1014","1202","1203","1209","1206","1304","1307",
-                              "1308","1210","1211","2102","1603","1702","1711","0703","0704","0403","0401","0311","0312")))
+hucs_test <- as_tibble(sort(c("0104","0106","0107","0108","0202","0415","1501","1407","1502","1505",
+                              "1503","1506","0317","0315","0603","1102","1402","1401","1403","1405",
+                              "1406","1404","1301","1408","1019","1018","0204","0314","0310","0308",
+                              "0307","0309","0306","0313","2001","2002","2006","2005","2201","0602",
+                              "0512","0404","0514","0708","0706","1107","0604","1026","1029","1027",
+                              "0513","0511","0510","1103","0402","0405","0406","0806","0801","0410",
+                              "0318","0316","0505","0305","0304","0601","0302","0303","0301","1011",
+                              "1013","1006","1017","1015","1606","1809","1602","0203","1024","1302",
+                              "1504","1108","1305","1306","1104","0412","0414","0110","0411","0506",
+                              "0504","0508","0509","0207","0502","0208","1908","1101","0804","1111",
+                              "1807","1805","1801","1804","1806","1802","1803","1704","1706","0713",
+                              "0714","0809","0808","0803","0805","1114","0109","0206","0102","0103",
+                              "0105","0904","1002","1701","1008","1007","1003","1113","1710","1707",
+                              "1708","1709","2101","1012","1016","1109","1014","1202","1203","1209",
+                              "1206","1304","1307","1308","1210","1211","2102","1603","1702","1711",
+                              "0703","0704","0403","0401","0311","0312")))
 
 nhdhr <-  as_tibble(list.files('data/in/nhdplushr/', pattern="*.gdb", recursive = TRUE) %>%
                       str_sub(., 14, 17) %>% unique())
@@ -197,15 +215,20 @@ for(i in 1:length(missing)){
 }
 ```
 
+#### Download the NHDPlus V2 database:
 
-Download the NHDPlus V2 database (for the app)
 ```{r}
+download_nhdplusv2(outdir = 'data/in/',
+                   url = paste0("https://edap-ow-data-commons.s3.amazonaws.com/NHDPlusV21/",
+                                "Data/NationalData/NHDPlusV21_NationalData_Seamless",
+                                "_Geodatabase_Lower48_07.7z"),
+                   progress = TRUE)
+
 nhdplus_contus_catchments <- sf::st_read(dsn = "data/in/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb",
                                          layer = "Catchment")
 
-# to pull faster, project and convert the catchment feature:
+# to pull faster, project and convert the catchment features:
 nhdplus_contus_catchments <- nhdplus_contus_catchments %>%
   sf::st_transform(projection) 
 saveRDS(nhdplus_contus_catchments, 'data/mid/nhdplus_contus_catchments_3857.RDS')
 ```
-

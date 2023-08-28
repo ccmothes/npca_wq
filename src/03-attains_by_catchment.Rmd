@@ -1,5 +1,5 @@
 ---
-title: "attains_park_stats"
+title: "03 - ATTAINS Statistics by Catchment"
 author: "Kathryn Willi"
 date: "2023-05-16"
 output: html_document
@@ -14,7 +14,7 @@ library(tidyverse) # tidying
 library(sf) # geospatial analysis
 library(mapview) # for quickly viewing geospatial data
 
-map(list.files('fxn', full.names = TRUE), source)
+map(list.files('src/fxn', full.names = TRUE), source)
 
 sf::sf_use_s2(FALSE)
 
@@ -24,7 +24,9 @@ parks <- sf::st_read("data/in/nps_boundary.shp") %>%
   sf::st_transform(4269)
 ``` 
 
-Subset and clip all catchments and flowlines within park boundaries. This is done iteratively over individual HUC-4s, because the NHR-HR is VERY large and breaking it up speeds up processing time.
+This workflow utilizes the catchment information that we pulled in step 2
+
+Subset and clip all catchments and flowlines within park boundaries. This is done iteratively over individual HUC-4s, because the NHRPlus HR is VERY large, and breaking it up speeds up processing time and reduces risk of crashing.
 
 ```{r}
 # List of HUC-2s to map over:
@@ -179,6 +181,7 @@ nhdhr_park_catch_dissolve <- nhdhr_park_catch %>%
 # ... to use as an "eraser" for creating polygons where catchments don't
 # exist in parks:
 empty_park_space <- parks %>%
+  sf::st_transform(4269) %>%
   sf::st_difference(., nhdhr_park_catch_dissolve) %>%
   select(UNIT_CODE) %>%
   mutate(CATCH_TYPE = "COASTAL")
@@ -198,11 +201,11 @@ npca_regions <- sf::st_read("data/in/npca_regions.shp")
 parks <- sf::st_read("data/in/nps_boundary.shp") 
 
 # Load in all raw geospatial ATTAINS data:
-attains_areas <- readRDS('data/mid/attains_au_areas.RDS') 
+attains_areas <- readRDS('data/mid/attains_au_areas_.RDS') 
 
-attains_lines <- readRDS('data/mid/attains_au_lines.RDS')
+attains_lines <- readRDS('data/mid/attains_au_lines_.RDS')
 
-attains_points <- readRDS('data/mid/attains_au_points.RDS')
+attains_points <- readRDS('data/mid/attains_au_points_.RDS')
 
 # Load in ATTAINS water quality standard parameter data:
 attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
