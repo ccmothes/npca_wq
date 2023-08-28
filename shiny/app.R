@@ -12,36 +12,36 @@ library(shinyBS)
 
 sf::sf_use_s2(FALSE)
 
-boundary_lines <- readRDS('shiny/data/nps_boundary_lines.RDS') 
-states <- readRDS('shiny/data/states.RDS')
+boundary_lines <- readRDS('data/nps_boundary_lines.RDS') 
+states <- readRDS('data/states.RDS')
 
 
 # Catchment boundaries
-inside <- readRDS('shiny/data/catch.RDS') 
+inside <- readRDS('data/catch.RDS') 
 
 # ATTAINS
-lines <- readRDS('shiny/data/lines.RDS') 
-areas <- readRDS('shiny/data/areas.RDS')
-points <- readRDS('shiny/data/points.RDS')
+lines <- readRDS('data/lines.RDS') 
+areas <- readRDS('data/areas.RDS')
+points <- readRDS('data/points.RDS')
 # Download Table
-attains_data <- readRDS('shiny/data/attains_table.RDS')
+attains_data <- readRDS('data/attains_table.RDS')
 
 #Tier 2.5 and Tier 3 Waters
-orw <- readRDS('shiny/data/orw_.RDS')
+orw <- readRDS('data/orw_.RDS')
 
 # For park mapper
-nps_points <- readRDS('shiny/data/nps_points.RDS')
+nps_points <- readRDS('data/nps_points.RDS')
 
 # NHD
-nhd_lines <- readRDS('shiny/data/map_flowlines.RDS')
-nhd_waterbodies <- readRDS('shiny/data/map_waterbodies.RDS')
-nhd_areas <- readRDS('shiny/data/map_areas.RDS')
+nhd_lines <- readRDS('data/map_flowlines.RDS')
+nhd_waterbodies <- readRDS('data/map_waterbodies.RDS')
+nhd_areas <- readRDS('data/map_areas.RDS')
 
 #ATTAINS Watershed
-ws_lines <-readRDS('shiny/data/ws_lines.RDS')
-ws_areas <-readRDS('shiny/data/ws_areas.RDS')
-ws_points <- readRDS('shiny/data/ws_points.RDS')
-ws <- readRDS('shiny/data/ws.RDS')
+ws_lines <-readRDS('data/ws_lines.RDS')
+ws_areas <-readRDS('data/ws_areas.RDS')
+ws_points <- readRDS('data/ws_points.RDS')
+ws <- readRDS('data/ws.RDS')
 
 ui <- navbarPage("National Park Service Water Quality",
                  
@@ -49,10 +49,11 @@ ui <- navbarPage("National Park Service Water Quality",
                           
                           fluidPage(
                             fluidRow(
+                              br(),
                               column(3, 
-                                     h6("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
-              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database. The pie chart plots the fraction of park units impaired by the selected water quality
-              parameter(s). When selecting impairments, only parks with ALL selected impairments will be displayed."),
+                                     h4("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
+              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database."),
+              hr(),
               fluidRow(pickerInput(
                 inputId = "impairment", 
                 label = "Select Impairments:",
@@ -66,24 +67,33 @@ ui <- navbarPage("National Park Service Water Quality",
                                   "CAUSE UNKNOWN - FISH KILLS","CHLORINE")),
                 selected = c("PATHOGENS"),
                 options = list('actions-box' = TRUE),
-                multiple = TRUE)),
+                multiple = TRUE),
+               em("When selecting impairments, only parks with ALL selected impairments will be displayed."),
+               br(),
+               br(),
+
+               strong("Fraction of all park units impaired by the selected water quality
+                parameter(s):")
+               
+              ),
               
               fluidRow(plotOutput("plot1"))),
               column(9,
-                     h6(""),
-                     h6(""),
                      br(),
-                     leafletOutput("map1"), height = "100%")))),
+                     # increase height of map relative to window size
+                     tags$style(type = "text/css", "#map1 {height: calc(100vh - 80px) !important;}"),
+                     leafletOutput("map1"))))),
               
               
               tabPanel("Explore by Park",
                        
                        fluidPage(
                          fluidRow(
+                           br(),
                            column(3, 
-                                  h6("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
-              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database. The pie chart plots water quality status by catchment 
-              area for a general assessment of how much of a particular park is assessed by their state water quality management agency."),
+                                  h4("This is a draft version of a data viewer to accompany NPCA's evaluation of state water quality assessments and the National Park Service System.
+              The underlying data used to develop this map comes from the EPA's most recent ATTAINS geospatial database."),
+              hr(),
               fluidRow(pickerInput(
                 inputId = "park", 
                 label = "Select National Park:",
@@ -91,16 +101,19 @@ ui <- navbarPage("National Park Service Water Quality",
                 selected = "Gauley River National Recreation Area",
                 options = list('actions-box' = TRUE),
                 multiple = FALSE)),
-              fluidRow(plotOutput("plot2"),
-                       #br(),
-                       downloadButton("downloadData", "Download Selected Data")
+              br(),
+              fluidRow(
+                plotOutput("plot2"),
+                br(),
+                br(),
+                downloadButton("downloadData", "Download Selected Data")
               )),
               
               column(9,
-                     h6(""),
-                     h6(""),
                      br(),
-                     leafletOutput("map2"), height = "100%")),
+                     # increase height of map relative to window size
+                     tags$style(type = "text/css", "#map2 {height: calc(100vh - 80px) !important;}"),
+                     leafletOutput("map2"))),
               br(),
               fluidRow(class = "table",
                        # Table
@@ -156,9 +169,12 @@ server <- function(input, output, session) {
       geom_bar(stat="identity", width=1, color="white") +
       coord_polar("y", start=0) +
       scale_fill_manual(values=c("#813B00","#C2CAD7")) +
-      guides(fill=guide_legend(title="")) +
       theme_void() + # remove background, grid, numeric label
-      theme(text = element_text(size = 20)) 
+      theme(text = element_text(size = 20),
+            legend.position = "bottom",
+            plot.margin = unit(c(0,0,0,0), "mm"))+
+      guides(fill=guide_legend(title="", nrow = 2))
+      
   })
   
   #  generarte the map object 
@@ -166,7 +182,7 @@ server <- function(input, output, session) {
     leaflet(options = leafletOptions(minZoom = 4)) %>%
       setView(lng = -105.07592352501446, 
               lat = 40.59085658003177, 
-              zoom = 6) %>%
+              zoom = 7) %>%
       addProviderTiles("CartoDB.Positron", group = "CartoDB.Positron") #%>%
     # addLayersControl(
     #   # baseGroups = c("OpenStreetMap", "Light"),
@@ -234,11 +250,18 @@ server <- function(input, output, session) {
   })
   
   filtered_data <- reactive({
-    
     # Filter data based on selected Park Unit.
-    if(!isTruthy(input$park)){attains_data<-filter(attains_data,Park=="Bogus")
-    }else{
-      attains_data <- filter(attains_data, Park == input$park)
+    if (!isTruthy(input$park)) {
+      attains_data <- filter(attains_data, Park == "Bogus")
+    } else{
+      attains_data <- filter(attains_data, Park == input$park) %>%
+        #edit URL column to hyperlink in datatable
+        mutate(URL =
+                 paste0('<a  target=_blank href=',
+                        URL,
+                        '>',
+                        URL,
+                        '</a>'))
     }
     
     attains_data
@@ -385,9 +408,13 @@ server <- function(input, output, session) {
       geom_bar(stat="identity", width=1, color="white") +
       coord_polar("y", start=0) +
       scale_fill_manual(values=pie$col) +
-      guides(fill=guide_legend(title="Status by Catchment Area")) +
       theme_void() + # remove background, grid, numeric label
-      theme(text = element_text(size = 20)) 
+      theme(text = element_text(size = 20),
+            plot.margin = unit(c(0,0,0,0), "mm"),
+            legend.position = "bottom") +
+      guides(fill=guide_legend(title="Status by Catchment Area", title.position = "top",
+                               nrow=5))
+      
   })
   
   #  generarte the map object 
@@ -428,7 +455,7 @@ server <- function(input, output, session) {
       clearShapes() %>%
       clearImages() %>%
       fitBounds(lng1 =  c1()[1], lat1 = c1()[2], lng2 =  c1()[3], lat2 = c1()[4]) %>%
-      
+
       addPolylines(
         data = boundary_liner(),
         fillColor = "",
@@ -483,13 +510,20 @@ server <- function(input, output, session) {
         fillOpacity = 0.55,
         color = "black",
         weight = 2,
+        layerId = areaer()$assessmentunitidentifier,
         popup = paste0("Status: ", areaer()$Assessment_Category,
                        "<br>",
                        "State ID: ", areaer()$assessmentunitidentifier,
                        "<br>",
                        "Impairments: ", areaer()$Impairments,
                        "<br>",
-                       "URL: ", areaer()$Link)) %>%
+                       "URL: ", areaer()$Link),
+        highlightOptions = highlightOptions(
+          color = "yellow",
+          opacity = 1,
+          weight = 3,
+          bringToFront = TRUE
+        )) %>%
       addPolylines(
         data = orwer(),
         fillColor = "#00714a",
@@ -508,26 +542,40 @@ server <- function(input, output, session) {
         fillOpacity = 1,
         color = liner()$dark_col,
         weight = 4.5,
+        layerId = liner()$assessmentunitidentifier,
         popup = paste0("Status: ", liner()$Assessment_Category,
                        "<br>",
                        "State ID: ", liner()$assessmentunitidentifier,
                        "<br>",
                        "Impairments: ", liner()$Impairments,
                        "<br>",
-                       "URL: ", liner()$Link)) %>%
+                       "URL: ", liner()$Link),
+        highlightOptions = highlightOptions(
+          color = "yellow",
+          opacity = 1,
+          weight = 3,
+          bringToFront = TRUE
+        )) %>%
       addCircles(
         data = pointer(),
         fill = pointer()$col,
         color = "black",
         fillOpacity = 0.5,
         group = "ATTAINS",
+        layerId = pointer()$assessmentunitidentifier,
         popup = paste0("Status: ", pointer()$Assessment_Category,
                        "<br>",
                        "State ID: ", pointer()$assessmentunitidentifier,
                        "<br>",
                        "Impairments: ", pointer()$Impairments,
                        "<br>",
-                       "URL: ", pointer()$Link)) %>%
+                       "URL: ", pointer()$Link),
+        highlightOptions = highlightOptions(
+          color = "yellow",
+          opacity = 1,
+          weight = 3,
+          bringToFront = TRUE
+        )) %>%
       addPolygons(
         data = ws_areaer(),
         fillColor = ws_areaer()$col,
@@ -587,13 +635,49 @@ server <- function(input, output, session) {
   })
   
   output$table <- DT::renderDataTable({
-    validate (need(nrow(filtered_data()) > 0, message="No ATTAINS data in this park unit."))
-    tableee <- filtered_data()
-    tableee$URL <- paste0('<a  target=_blank href=', tableee$URL, '>', tableee$URL,'</a>' )
-    DT::datatable(tableee , selection = 'single', escape = FALSE, options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))},
-    options = list(autoWidth=TRUE, scrollX=TRUE, scrollY = "400px", scrollCollapse = TRUE))
+    validate (need(nrow(filtered_data()) > 0, message = "No ATTAINS data in this park unit."))
+    # tableee <- filtered_data()
+    # tableee$URL <-
+    #   paste0('<a  target=_blank href=',
+    #          tableee$URL,
+    #          '>',
+    #          tableee$URL,
+    #          '</a>')
+    DT::datatable(
+      filtered_data() ,
+      selection = 'single',
+      escape = FALSE,
+      options = list(
+        autoWidth = TRUE,
+        scrollX = TRUE,
+        scrollY = "400px",
+        scrollCollapse = TRUE
+      )
+    )
+  },
+  options = list(
+    autoWidth = TRUE,
+    scrollX = TRUE,
+    scrollY = "400px",
+    scrollCollapse = TRUE
+  ))
   
-  
+  # Table proxy for highlighting and sorting map selection
+  observeEvent(input$map2_shape_click, {
+    
+    if(!is.null(input$map2_shape_click$id)) {
+      # get selected row
+      selected_row <- which(filtered_data()$Assessment_Code %in% input$map2_shape_click$id)
+      
+      # calculate new row order
+      row_order <- c(selected_row:nrow(filtered_data()), 1:(selected_row - 1))
+      
+      DT::dataTableProxy("table") %>%
+        replaceData(filtered_data()[row_order,]) %>% 
+        selectRows(1)
+      
+    }
+  })
   
   
   # Create a .csv of selected data for download.
