@@ -53,7 +53,6 @@ didnt_work <- anti_join(orw_only, filter(nhdhr_park_flows_and_orw, !is.na(Tier))
 
 bad_puller <- function(baddies){
   
-  
   data <- st_read(dsn = 'data/mid/arc_his/ArcHIS.gdb', layer = baddies) %>%
     st_transform(4326) %>%
     st_zm() %>%
@@ -68,8 +67,8 @@ bad_puller <- function(baddies){
   
 }
 
-# These are the parks whose NHD HR has been altered since NPS's last HIS workflow. Their raw flowlines shapefile features embedded in the mdb were
-# manually transformed to shapefiles in ArcGIS Desktop.
+# These are the parks whose NHD HR has been altered since NPS's last HIS workflow. Their raw flowlines shapefile features
+# embedded in the mdb were manually transformed to shapefiles in ArcGIS Desktop.
 
 baddies <- c("ACAD", "APPA", "BICA", "BICY", "BISC", "BISO", "BLRI", "BRCA", "BUFF", "CAHA", "CANA", "CONG", "CUVA", "DELA", 
              "DEWA", "DINO", "DRTO", "EVER", "GARI", "GLAC", "GRSM", "GRTE", "GUIS", "HOCU", "INDU", "ISRO", "MACA", "MEVE", 
@@ -102,7 +101,7 @@ flowlines <- readRDS('data/mid/nhdhr_park_flow.RDS') %>%
   left_join(park_table, by = "UNIT_CODE") %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326) %>%
-  select(UNIT_NAME, STATE)
+  dplyr::select(UNIT_NAME, STATE)
 saveRDS(flowlines, 'shiny/data/map_flowlines.RDS')
 areas <- readRDS('data/mid/nhdhr_park_area.RDS') %>%
   group_by(UNIT_CODE) %>%
@@ -300,7 +299,8 @@ park_point_unknown <- readRDS('data/mid/nps_attains_park_point.RDS') %>%
   st_transform(4326)
 
 park_points <- bind_rows(park_point_impaired, park_point_good) %>% #, park_point_unknown) %>%
-  filter(!Park %in% no_water$UNIT_NAME)
+  filter(!Park %in% no_water$UNIT_NAME) %>%
+  mutate(TYPE = "Point")
 saveRDS(park_points, 'shiny/data/points.RDS')
 
 # AREA #
@@ -386,7 +386,8 @@ park_area_unknown <- readRDS('data/mid/nps_attains_park_area_.RDS') %>%
   st_transform(4326)
 
 park_areas <- bind_rows(park_area_impaired, park_area_good, park_area_unknown) %>%
-  filter(!Park %in% no_water$UNIT_NAME)
+  filter(!Park %in% no_water$UNIT_NAME) %>%
+  mutate(TYPE = "Area")
 saveRDS(park_areas, 'shiny/data/areas.RDS')
 
 # LINE #
@@ -472,7 +473,8 @@ park_line_unknown <- readRDS('data/mid/nps_attains_park_line_.RDS') %>%
   st_transform(4326)
 
 park_lines <- bind_rows(park_line_impaired, park_line_good, park_line_unknown) %>%
-  filter(!Park %in% no_water$UNIT_NAME)
+  filter(!Park %in% no_water$UNIT_NAME) %>%
+  mutate(TYPE = "Line")
 
 saveRDS(park_lines, 'shiny/data/lines.RDS')
 ```
@@ -501,7 +503,8 @@ attains_table <- bind_rows(st_drop_geometry(park_lines), st_drop_geometry(park_a
          Assessment_Code = assessmentunitidentifier,
          Assessment_Category,
          Impairments,
-         URL = Link) 
+         URL = Link,
+         Type = TYPE) 
 saveRDS(attains_table, 'shiny/data/attains_table.RDS')
 ```
 
