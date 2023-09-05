@@ -1,5 +1,5 @@
 ---
-title: "attains_catchment_stats"
+title: "05 - Statistics by park unit"
 author: "Kathryn Willi"
 date: "2023-05-16"
 output: html_document
@@ -7,19 +7,28 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-
-# Getting the data
-
-Load in necessary datasets:
-```{r}
 library(tidyverse)
 library(sf)
+library(data.table)
+```
 
+This is where we develop ALL statistics associated with the Delivery 1 report. This includes: 
+
+- How many parks have an impaired assessment unit?
+- What are the top impairments across park units?
+- Which parks have water, but no assessment unit (i.e. which parks are unassessed)?
+- Which parks have outstanding resource waters?
+
+All statistics are only run on parks with water. We identified which parks had water by finding at park boundary unit that did not have any intersecting NHDPlus HR water body, area, of flowline features. We also utilized a table from the Hydrographic and Impairment Statistics database listing parks they consider to have to hydrography.
+
+#### Getting the data
+
+Load in necessary data sets:
+```{r}
 map(list.files('src/fxn', full.names = TRUE), source)
 
 # Load in park boundaries:
-parks <- st_read("data/in/nps_boundary.shp")
+parks <- st_read("data/in/nps_boundary.shp") 
 
 # Load in NPCA regions
 npca_regions <- st_read("data/in/npca_regions.shp") 
@@ -33,26 +42,68 @@ attains_points <- readRDS('data/mid/attains_au_points.RDS')
 
 # Load in ATTAINS water quality standard parameter data:
 attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
+
 ```
 
 Subset and clip the ATTAINS geospatial data to only include assessment units within NPS Park Boundaries.
 ```{r}
-nps_attains_areas <- attains_areas %>% 
+nps_attains_areas_raw <- attains_areas %>% 
   subsetATTAINS(layer = ., sub_by = parks, type = "area") %>%
-  mutate(assessment_type = "AREA") 
-saveRDS(nps_attains_areas,'data/mid/nps_attains_park_area_.RDS')
+  mutate(assessment_type = "AREA",
+         combo = paste0(UNIT_CODE, "-", assessmentunitidentifier))
+
+coastal_waters <- st_read('data/bad/erase_temp.shp') %>% select(UNIT_CODE) %>% mutate(CATCH_TYPE = "COASTAL", nhdplusid = NA, SHAPE = geometry) %>% sf::st_transform(3857) 
+
+nps_attains_areas_near_wb <- nps_attains_areas_raw %>%
+  # Only select area features within 10 meters of an NHD water feature.
+  # I have found that "area" ATTAINS features are the most coarse resolution
+  # of all ATTAINS features. Therefore, this step is to verify that ATTAINS
+  # areas within park units are actually linked to an existing water feature
+  # in the park:
+  st_buffer(10) %>%
+  # This layer I am joining by is the clipped NHD-HR features within park units.
+  # Meaning, only keep ATTAINS area features that are near on directly contain
+  # and NHD HR water feature:
+  st_join(., readRDS('data/mid/nhdhr_park_waterbody.RDS'), left = FALSE) %>% 
+  select(combo)
+
+nps_attains_areas_near_flowlines <- nps_attains_areas_raw %>%
+  # Only select area features within 10 meters of a water feature
+  st_buffer(10) %>%
+  st_join(., readRDS('data/mid/nhdhr_park_flow.RDS'), left = FALSE) %>%
+  select(combo)
+
+nps_attains_areas_near_areas <- nps_attains_areas_raw %>%
+  # Only select area features within 10 meters of a water feature
+  st_buffer(10) %>%
+  st_join(., readRDS('data/mid/nhdhr_park_area.RDS'), left = FALSE) %>%
+  select(combo)
+
+nps_attains_areas_near_coasts <- nps_attains_areas_raw %>%
+  # Only select area features within 10 meters of a water feature
+  st_buffer(10) %>%
+  st_join(., select(coastal_waters, CATCH_TYPE), left = FALSE) %>%
+  select(combo)
+
+nps_attains_areas <- nps_attains_areas_raw %>%
+  filter(combo %in% c(nps_attains_areas_near_wb$combo, nps_attains_areas_near_flowlines$combo, 
+                      nps_attains_areas_near_areas$combo, nps_attains_areas_near_coasts$combo)| 
+           # Cannot do this exercise in states without NHD:
+           STATE %in% c("AK","HI","PR","VI","AS","GU","MP"))
+
+saveRDS(nps_attains_areas,'data/mid/nps_attains_park_area_right.RDS')
 
 nps_attains_lines <- attains_lines %>%
   subsetATTAINS(layer = ., sub_by = parks, type = "line") %>%
   mutate(assessment_type = "LINE")
-saveRDS(nps_attains_lines,'data/mid/nps_attains_park_line_.RDS')
+saveRDS(nps_attains_lines,'data/mid/nps_attains_park_line_right.RDS')
 
 nps_attains_points <- attains_points %>%
   subsetATTAINS(layer = ., sub_by = parks, type = "point") %>%
   mutate(assessment_type = "POINT")
-saveRDS(nps_attains_points,'data/mid/nps_attains_park_point_.RDS')
+saveRDS(nps_attains_points,'data/mid/nps_attains_park_point_right.RDS')
 
-# this represents all assessment units (areal, point, linear) that are physically within the park boundaries
+# this represents all assessment units (area, point, linear) that are physically within the park boundaries
 nps_all_attains <- bind_rows(as_tibble(nps_attains_areas), as_tibble(nps_attains_lines), as_tibble(nps_attains_points)) %>%
   as_tibble(.) %>%
   # join to assessment unit parameter data:
@@ -61,9 +112,11 @@ nps_all_attains <- bind_rows(as_tibble(nps_attains_areas), as_tibble(nps_attains
                    dplyr::select(attains_assmnt_parms, -c(assmnt_joinkey, organizationid, submissionid, orgtype, tas303d, reportingcycle, waterbodyreportlink, GLOBALID)),
                    by = "assessmentunitidentifier", multiple = "all")
 
+raw_parks <- st_read("data/in/nps_boundary.shp") 
 # Lastly remove all data linked to parks without water features in them (CONTUS only):
-no_water <- parks %>%
-  # cannot include these states in this exercise as they don't have nhd hr in them to begin with:
+no_water <- raw_parks %>%
+  # cannot include these states in this exercise as they don't have nhd hr in them to begin with
+  # but, all parks outside CONUS have water (based on a manual inspection of them)
   filter(!STATE %in% c("AK","HI","PR","VI","AS","GU","MP")) %>%
   # this is a weird lil park in the Middle of Lake Erie:
   filter(UNIT_CODE != "PEVI") %>%
@@ -71,21 +124,23 @@ no_water <- parks %>%
   filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_area.RDS')$UNIT_CODE) %>%
   filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_flow.RDS')$UNIT_CODE) %>%
   filter(!UNIT_CODE %in% readRDS('data/mid/nhdhr_park_waterbody.RDS')$UNIT_CODE) %>%
-  # table developed by NPS that lists parks without water (by unit name):
-  bind_rows(filter(parks, UNIT_NAME %in% read_csv('data/in/no_water_parks.csv')$UNIT_NAME)) %>%
+  # table developed by NPS (but edited by me to include more parks that have no water - based on
+  # a manual inspection) that lists parks without water:
+  bind_rows(filter(raw_parks, UNIT_NAME %in% read_csv('data/in/no_water_parks.csv')$UNIT_NAME)) %>%
   distinct(UNIT_NAME, .keep_all = TRUE) %>%
-  mutate(hydro = "No Water Features")
+  mutate(hydro = "No Water Features") %>%
+  st_drop_geometry()
 
 nps_all_attains <- nps_all_attains %>%
-  filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%
-  bind_rows(no_water)
+  filter(!UNIT_CODE %in% no_water$UNIT_CODE) %>%
+  bind_rows(no_water) 
 
-saveRDS(nps_all_attains, 'data/out/nps_all_wq_data_final_.RDS')
+saveRDS(nps_all_attains, 'data/out/nps_all_wq_data_final_right.RDS')
 ```
 
-# Exploring the data
+#### Exploring the data
 ```{r}
-nps_all_attains <- readRDS('data/out/nps_all_wq_data_final_.RDS')
+nps_all_attains <- readRDS('data/out/nps_all_wq_data_final_right.RDS')
 
 colors <- data.frame(
   overallstatus = c("Not Supporting", "Fully Supporting", "Not Assessed", NA),
@@ -113,7 +168,7 @@ parks <- parks %>%
   st_join(., npca_regions)
 ```
 
-Impaired Parks
+##### Impaired Parks
 ```{r}
 nps_all_attains <- nps_all_attains %>%
   left_join(colors, by = "overallstatus") %>%
@@ -149,10 +204,10 @@ ggplot() +
   geom_sf(data = states, fill = NA) +
   geom_sf(data = parks_mapper, color = "#C2CAD7") + 
   geom_sf(data = impaired_mapper, fill ="#DC851E", color = "black", size = 3, pch = 21) 
-ggsave('data/out/figs/impaired_parks.jpg')
+ggsave('data/out/figs/impaired_parks.jpg')#, width = 12.14, height = 7.5, units = "cm")
 ```
 
-Common impairments
+##### Common impairments
 ```{r}
 # What impairments are the most common across park units?
 top_impairments <- nps_all_attains %>% 
@@ -269,7 +324,7 @@ ggplot() +
 ggsave('data/out/figs/pcbs.jpg')
 ```
 
-Impairments by NPCA Region
+##### Impairments by NPCA Region
 ```{r}
 # What impairments are the most common across regions?
 top_npca_impairments <- nps_all_attains %>% 
@@ -283,8 +338,7 @@ top_npca_impairments <- nps_all_attains %>%
   slice(1:10)
 ```
 
-
-Which parks have no water quality data?
+##### Which parks have no water quality data?
 ```{r}
 no_data <- parks %>% 
   anti_join(., nps_all_attains, by = "UNIT_CODE") %>%
@@ -304,7 +358,7 @@ ggplot() +
 ggsave('data/out/figs/no_data.jpg')
 ```
 
-Which parks have ORWs?
+##### Which parks have ORWs?
 ```{r}
 park_table <- parks %>%
   st_drop_geometry() %>%
@@ -319,7 +373,7 @@ none <- park_table %>%
   anti_join(., any, by = c("UNIT_CODE" = "unit_code")) %>%
   # don't include parks without water in the count:
   dplyr::filter(!UNIT_CODE %in% no_water$UNIT_CODE)
-276/351
+
 orw <- readRDS('data/mid/parks_with_orw.RDS') %>%
   inner_join(park_table, by = c("unit_code"="UNIT_CODE")) %>%
   distinct(unit_code, Tier) %>%
