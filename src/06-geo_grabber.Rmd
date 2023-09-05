@@ -137,15 +137,9 @@ baddie_grabber <- function(baddies_list){
     mutate(TYPE = "ZIPCODE") %>%
     st_drop_geometry()
   
-  # bbox <- st_bbox(parks) %>% as_tibble() %>%
-  #   mutate(TYPE = c("bbox:xmin", "bbox:ymin", "bbox:xmax", "bbox:ymax")) %>%
-  #   rename(NAME = x) %>%
-  #   mutate(NAME = as.character(NAME)) %>%
-  #   st_drop_geometry()
-  
   print(paste0(parks$UNIT_CODE, " done!"))
   
-  me <- rbind(places, county, huc12, zipcode, bbox) %>%
+  me <- rbind(places, county, huc12, zipcode) %>%
     mutate(UNIT_CODE = unique(parks$UNIT_CODE)) 
   # back up
   write_csv(me, paste0('data/mid/aoi/', parks$UNIT_CODE, "-", parks$rowid, '.csv'))
@@ -169,17 +163,22 @@ bad_sites <- baddies_list %>%
 
 
 bbox <- st_bbox(filter(parks_buf, UNIT_CODE == "APPA")) %>% as_tibble() %>%
-  mutate(TYPE = c("bbox:xmin", "bbox:ymin", "bbox:xmax", "bbox:ymax")) %>%
+  mutate(TYPE = c("bbox:xmin", "bbox:ymin", "bbox:xmax", "bbox:ymax"))# %>%
   rename(NAME = x) %>%
-  mutate(NAME = as.character(NAME)) %>%
+  mutate(UNIT_CODE="APPA") %>%
   st_drop_geometry()
 ```
-
 
 Bind all AOIs by parks into a single file:
 ```{r}
 all_aois <- list.files('data/mid/aoi/', full.names = TRUE) %>%
   map_dfr(~read_csv(.)) %>%
-  distinct(.keep_all = TRUE) 
+  distinct(.keep_all = TRUE) %>%
+  #Bounding boxes too big and not useful for these parks so I'm not including them:
+  bind_rows(tibble(UNIT_CODE = c("APPA", "MAPR"),
+                   NAME = c(NA, NA),
+                   TYPE = c("bbox", "bbox"))) 
+
+write_csv(all_aois, 'data/out/D2_Appendix_A2.csv')
 ```
 
