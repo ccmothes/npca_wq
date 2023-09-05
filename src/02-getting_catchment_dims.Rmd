@@ -12,14 +12,14 @@ library(sf)
 sf_use_s2(FALSE)
 ```
 
-NHD HR catchments are used as the foundation for linking the ATTAINS geospatial features to waters within the National Park Service System for use in our Shiny app (whose development is the last step in the workflow). Furthermore, the ATTAINS database is working towards aggregating their assessment unit data to the NHDPlus HR catchment layer as a means of standardizing across states, providing additional justification for implementing our visualization approach.
+NHD HR catchments are used for better visualizing the ATTAINS geospatial features within the National Park Service System in our Shiny app (whose development is the last step in the workflow). Furthermore, the ATTAINS database is working towards aggregating their assessment unit data to the NHDPlus HR catchment layer as a means of standardizing across states, providing additional justification for implementing our visualization approach.
 
-Here, we link each ATTAINS assessment unit's geospatial layer with its associated NHDPlus HR catchments. Catchments that did not contain any ATTAINS features, but still included a NHDPlus HR water feature, are considered unassessed. For consistency with the [ATTAINS catchment indexing approach](https://www.epa.gov/waterdata/integrated-reporting-georeferencing-pilot-report), we also considered catchments unassessed if they only contained pieces of a line-type assessment unit that was less than 30 meters in length. For additional consistency with the ATTAINS indexing approach, we considered catchments unassessed if they only contained a piece of a polygon assessment unit whose area within that catchment accounted for less that 1% of its total area, or if the polygon assessment unit covered less that 50% of the catchment.
+Here, we link each ATTAINS assessment unit's geospatial layer with its associated NHDPlus HR catchment. Catchments that did not contain any ATTAINS features, but still included a NHDPlus HR water feature, are considered unassessed. For consistency with the [ATTAINS catchment indexing approach](https://www.epa.gov/waterdata/integrated-reporting-georeferencing-pilot-report), we also considered catchments unassessed if they only contained pieces of a line-type assessment unit that was less than 30 meters in length. For additional consistency with the ATTAINS indexing approach, we considered catchments unassessed if they only contained a piece of a polygon assessment unit whose area within that catchment accounted for less that 1% of its total area, or if the polygon assessment unit covered less that 50% of the catchment.
 
-#### Identifying appropriate catchment-assessment unit combinations:
+#### Identifying appropriate catchment-assessment unit combinations (for visualiztion purposes in the app ONLY):
 
 ```{r}
-# Load in park boundaries (from NPS IRMA)
+# Load in park boundaries (from NPS IRMA, modified in 01-downloading_data.Rmd)
 parks <- sf::st_read("data/in/nps_boundary.shp")
 
 # List of HUC-2s to map over:
@@ -29,15 +29,20 @@ hucs <- (c("01","02","03","04","05","06","07","08","09","10",
 
 park_areas <- readRDS('data/mid/attains_au_areas_.RDS') %>%
   .[parks,] %>%
+  # so they play nice with NHD features downstream, and get units in meters/square meters:
   st_transform(4269) 
+saveRDS(park_areas, 'data/mid/park_unclipped_areas.RDS')
 
 park_lines <- readRDS('data/mid/attains_au_lines_.RDS') %>%
   .[parks,] %>%
   st_transform(4269)
+saveRDS(park_lines, 'data/mid/park_unclipped_lines.RDS')
 
 ## Total length and areas:
 park_areas$total_area <- sf::st_area(park_areas, by_element = TRUE)
 park_lines$total_length <- sf::st_length(park_lines, by_element = TRUE)
+
+# Clip NHD-HR features within park units across individual HUC-4 files:
 
 find_the_baddies <- function(hucs){
   
@@ -46,11 +51,11 @@ find_the_baddies <- function(hucs){
   
   files <- list.files(nhdhr, pattern = "GDB.gdb", full.names=TRUE)
   
-  # Clip NHD-HR features within park units across individual HUC-4 files:
   for(i in 1:length(files)){
     
-    # filter out and clip the flowline features within the park boundaries:
-    catchments <- sf::st_read(dsn = files[i], layer = "NHDPlusCatchment")
+    # filter out and clip the catchment features within the park boundaries:
+    catchments <- sf::st_read(dsn = files[i], layer = "NHDPlusCatchment") %>%
+      .[st_transform(parks, 4269),]
     catchments$square_meters <- sf::st_area(catchments, by_element = TRUE)
     
     try(areas <- park_areas %>%
@@ -58,14 +63,13 @@ find_the_baddies <- function(hucs){
           select(nhdplusid = NHDPlusID, total_area, assessmentunitidentifier, square_meters))
     try(areas$catchment_area <- sf::st_area(areas, by_element = TRUE))
     
-    
     try(lines <- park_lines %>%
           st_intersection(.,catchments) %>%
           select(nhdplusid = NHDPlusID, total_length, assessmentunitidentifier, square_meters))
     try(lines$catchment_length <- sf::st_length(lines, by_element = TRUE))
     
     
-    # save it:
+    # save list of clipped ATTAINS features as tables:
     try(saveRDS(st_drop_geometry(lines), paste0("data/mid/catchment_au_test/lines_",
                                                 str_sub(files[i], 33, 36), 
                                                 ".RDS")))
@@ -80,15 +84,16 @@ find_the_baddies <- function(hucs){
 }
 
 walk(hucs, find_the_baddies)
+```
 
+#### Select the conditions for choosing what's deemed "appropriate" as far as ATTAINS-catchment combos (see main summary at the top... at least 30m within the catchment if flowline, the ATTAINS area has to contain at least 1% of the total area of the ATTAINS AU, or the assessment unit covers at least 50% of the catchment:)
+
+```{r}
 right_dims_lines <- list.files('data/mid/catchment_au_test/', pattern = "lines", full.names = TRUE) %>%
   map(~readRDS(.)) %>%
   bind_rows() %>%
-  # remove line features from catchments that have less than 30 meters within:
   filter(as.numeric(catchment_length) >= 30) 
 saveRDS(right_dims_lines, 'data/mid/right_dims_lines_.RDS')
-
-
 
 right_dims_areas <- list.files('data/mid/catchment_au_test/', pattern = "areas", full.names = TRUE) %>%
   map(~readRDS(.)) %>%
