@@ -5,10 +5,10 @@ account: geocentroid
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 9236118
-bundleId: 7617567
+bundleId: 7636522
 url: https://geocentroid.shinyapps.io/NPCA_Water_Quality_Visualizer/
-when: 1693241075.07038
-lastSyncTime: 1693241075.07038
+when: 1693606132.34379
+lastSyncTime: 1693606132.3438
 asMultiple: FALSE
 asStatic: FALSE
-ignoredFiles: app_preparation.Rmd|data.zip
+ignoredFiles: app_preparation.Rmd|ws_prepper.Rmd
