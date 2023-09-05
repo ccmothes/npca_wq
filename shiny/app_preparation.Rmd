@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(sf)
+library(data.table)
 sf::sf_use_s2(FALSE)
 ```
 
@@ -99,7 +100,7 @@ flowlines <- readRDS('data/mid/nhdhr_park_flow.RDS') %>%
   group_by(UNIT_CODE) %>%
   summarize() %>%
   left_join(park_table, by = "UNIT_CODE") %>%
-  sf::st_simplify(dTolerance = 10) %>%
+  #sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326) %>%
   dplyr::select(UNIT_NAME, STATE)
 saveRDS(flowlines, 'shiny/data/map_flowlines.RDS')
@@ -107,14 +108,14 @@ areas <- readRDS('data/mid/nhdhr_park_area.RDS') %>%
   group_by(UNIT_CODE) %>%
   summarize() %>%
   left_join(park_table, by = "UNIT_CODE") %>%
-  sf::st_simplify(dTolerance = 10) %>%
+  #sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326) %>%
   select(UNIT_NAME, STATE)
 saveRDS(areas, 'shiny/data/map_areas.RDS')
 waterbodies <- readRDS('data/mid/nhdhr_park_waterbody.RDS') %>%
   group_by(UNIT_CODE) %>%
   summarize() %>%
-  sf::st_simplify(dTolerance = 10) %>%
+  #sf::st_simplify(dTolerance = 10) %>%
   left_join(park_table, by = "UNIT_CODE") %>% 
   st_transform(4326) %>%
   select(UNIT_NAME, STATE)
@@ -137,11 +138,12 @@ no_water <- parks %>%
 
 # CATCHMENT DATA #
 
-park_catch <- readRDS('data/mid/final_raw_catch.RDS') %>%
+park_catch <- readRDS('data/mid/final_raw_catch_.RDS') %>%
   left_join(., st_drop_geometry(parks), by = "UNIT_CODE") %>%
   mutate(nhdplusid = as.character(nhdplusid)) %>%
   select(UNIT_CODE, UNIT_NAME, nhdplusid, CATCH_TYPE)
 
+# find catchments with water features in them:
 park_empty_catch_1 <- park_catch %>%
   .[readRDS('data/mid/nhdhr_park_area.RDS'),]
 
@@ -156,12 +158,11 @@ empty_catch <- park_catch %>%
   filter(!nhdplusid %in% park_empty_catch_1$nhdplusid) %>%
   filter(!nhdplusid %in% park_empty_catch_2$nhdplusid) %>%
   filter(!nhdplusid %in% park_empty_catch_3$nhdplusid)
-
 ```
 
 Catchment-level ATTAINS data:
 ```{r}
-nps_all_attains <- readRDS('data/mid/nps_attains_catchment_table_.RDS') %>%
+nps_all_attains <- readRDS('data/mid/nps_attains_catchment_geospatial_.RDS') %>%
   left_join(., park_table, by = "UNIT_CODE")  %>%
   mutate(nhdplusid = as.character(nhdplusid)) %>%
   select(UNIT_NAME, office, nhdplusid, parametername, ircategory, parametercategorycode)
@@ -196,10 +197,13 @@ unknown_list <- nps_all_attains %>%
 attains <- bind_rows(impaired_list, good_list, unknown_list)
 
 for_app <- park_catch %>%
-  left_join(., attains, by=c("nhdplusid", "UNIT_NAME")) %>% 
+  left_join(., data.table::data.table(attains), by=c("nhdplusid", "UNIT_NAME")) %>% 
+                                # if the Unit Name is listed as being a no water park: "No water features"
   mutate(Assessment_Category =  ifelse(UNIT_NAME %in% no_water$UNIT_NAME, "No Water Features",
-                                       ifelse(is.na(Assessment_Category) & nhdplusid %in% empty_catch$nhdplusid, "No Water Features",
-                                              ifelse(is.na(Assessment_Category) & !nhdplusid %in% empty_catch$nhdplusid, "No State Data", Assessment_Category)))) %>%
+                                # if the comid is listed as having no water features: "No water features"
+                                ifelse(is.na(Assessment_Category) & nhdplusid %in% empty_catch$nhdplusid, "No Water Features",
+                                # if there's no assessment category data, but the catchment has water features: 'no state data'
+                                ifelse(is.na(Assessment_Category) & !nhdplusid %in% empty_catch$nhdplusid, "No State Data", Assessment_Category)))) %>%
   sp::merge(colors, by ="Assessment_Category") %>%
   dplyr::rename(Park = UNIT_NAME) %>% 
   left_join(st_drop_geometry(parks), by=c("Park" = "UNIT_NAME")) %>%
@@ -208,17 +212,24 @@ for_app <- park_catch %>%
 
 for_app$catchment_area <- sf::st_area(for_app, by_element = TRUE)
 
-for_app <- for_app %>%
+for_app_update <- for_app %>%
   select(Assessment_Category, Park, nhdplusid, Impairments, catchment_area, col) %>%
-  sf::st_simplify(dTolerance = 0.0001)
+  data.table() %>%
+  distinct(.keep_all = TRUE) %>%
+  st_as_sf()
+  #sf::st_simplify(dTolerance = 0.0001) #%>%
+  # a very strange thing happens in Acadia - I think due to all the islands/combos of catchments and coastal pseudo catchments.
+  # mutate(Assessment_Category = ifelse(Park == "Acadia National Park" & Assessment_Category== "Impaired" & is.na(nhdplusid), "Good", Assessment_Category)) %>%
+  # mutate(Impairments = ifelse(Park == "Acadia National Park" & Assessment_Category == "Good" & is.na(nhdplusid), "None", Impairments))
+  #   mutate(col = ifelse(Park == "Acadia National Park" & Assessment_Category == "Good" & is.na(nhdplusid), "#059FA4", col))
 
-saveRDS(for_app, 'shiny/data/catch.RDS')
+saveRDS(for_app_update, 'shiny/data/catch.RDS')
 ```
 
 Raw geospatial ATTAINS features in parks
 ```{r}
 # PARK ATTAINS #
-park_point_impaired <- readRDS('data/mid/nps_attains_park_point_.RDS') %>%
+park_point_impaired <- readRDS('data/mid/nps_attains_park_point_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'), 
@@ -245,7 +256,7 @@ park_point_impaired <- readRDS('data/mid/nps_attains_park_point_.RDS') %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326)
 
-park_point_good <- readRDS('data/mid/nps_attains_park_point_.RDS') %>%
+park_point_good <- readRDS('data/mid/nps_attains_park_point_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'), 
@@ -271,7 +282,7 @@ park_point_good <- readRDS('data/mid/nps_attains_park_point_.RDS') %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326)
 
-park_point_unknown <- readRDS('data/mid/nps_attains_park_point.RDS') %>%
+park_point_unknown <- readRDS('data/mid/nps_attains_park_point_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'),
@@ -305,7 +316,7 @@ saveRDS(park_points, 'shiny/data/points.RDS')
 
 # AREA #
 
-park_area_impaired <- readRDS('data/mid/nps_attains_park_area_.RDS') %>%
+park_area_impaired <- readRDS('data/mid/nps_attains_park_area_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'), 
@@ -332,7 +343,7 @@ park_area_impaired <- readRDS('data/mid/nps_attains_park_area_.RDS') %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326)
 
-park_area_good <- readRDS('data/mid/nps_attains_park_area_.RDS') %>%
+park_area_good <- readRDS('data/mid/nps_attains_park_area_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'),
@@ -358,7 +369,7 @@ park_area_good <- readRDS('data/mid/nps_attains_park_area_.RDS') %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326)
 
-park_area_unknown <- readRDS('data/mid/nps_attains_park_area_.RDS') %>%
+park_area_unknown <- readRDS('data/mid/nps_attains_park_area_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'), 
@@ -392,7 +403,7 @@ saveRDS(park_areas, 'shiny/data/areas.RDS')
 
 # LINE #
 
-park_line_impaired <- readRDS('data/mid/nps_attains_park_line_.RDS') %>%
+park_line_impaired <- readRDS('data/mid/nps_attains_park_line_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'),
@@ -419,7 +430,7 @@ park_line_impaired <- readRDS('data/mid/nps_attains_park_line_.RDS') %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326)
 
-park_line_good <- readRDS('data/mid/nps_attains_park_line_.RDS') %>%
+park_line_good <- readRDS('data/mid/nps_attains_park_line_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'), 
@@ -445,7 +456,7 @@ park_line_good <- readRDS('data/mid/nps_attains_park_line_.RDS') %>%
   sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326)
 
-park_line_unknown <- readRDS('data/mid/nps_attains_park_line_.RDS') %>%
+park_line_unknown <- readRDS('data/mid/nps_attains_park_line_right.RDS') %>%
   dplyr::left_join(.,
                    # remove duplicate/unnecessary columns:
                    dplyr::select(readRDS('data/mid/attains_au_assmnt_parms.RDS'), 
@@ -510,7 +521,7 @@ saveRDS(attains_table, 'shiny/data/attains_table.RDS')
 
 # Park-wide impairment mapper (tab 1):
 ```{r}
-parkwide_all_attains <- readRDS('data/out/nps_all_wq_data_final_.RDS') %>%
+parkwide_all_attains <- readRDS('data/out/nps_all_wq_data_final_right.RDS') %>%
   dplyr::filter(parametercategorycode %in% c("5A","5","4C","4B", "4A")) %>%
   mutate(parametergroupname = ifelse(parametergroupname == "METALS (OTHER THAN MERCURY)", "METALS OTHER THAN HG",
                               ifelse(parametergroupname == "POLYCHLORINATED BIPHENYLS (PCBS)", "POLYCHLORINATED BIPHENYLS - PCBS", parametergroupname))) %>%
@@ -535,7 +546,8 @@ saveRDS(nps_points, 'shiny/data/nps_points.RDS')
 states <- readRDS('data/mid/states.RDS') %>%
   select(STUSPS, NAME) %>%
   st_transform(4326) %>%
-   sf::st_cast("MULTILINESTRING") 
+   sf::st_cast("MULTILINESTRING") %>%
+  mutate(STUSPS = ifelse(is.na(STUSPS), "MI", STUSPS))
 saveRDS(states, 'shiny/data/states.RDS')
 ```
 
