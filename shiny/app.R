@@ -23,6 +23,7 @@ inside <- readRDS('data/catch.RDS')
 lines <- readRDS('data/lines.RDS') 
 areas <- readRDS('data/areas.RDS')
 points <- readRDS('data/points.RDS')
+
 # Download Table
 attains_data <- readRDS('data/attains_table.RDS')
 
@@ -161,7 +162,7 @@ server <- function(input, output, session) {
       distinct(Park, .keep_all = TRUE) %>%
       dplyr::summarize(count=n())
     pie <- pie %>%
-      mutate(prop = count/351) %>%  
+      mutate(prop = count/345) %>%  
       mutate(ypos = cumsum(prop) - 0.5*prop) %>%
       mutate(legend = paste0(baddies, " (", scales::percent(prop, accuracy=0.01), ")"))
     
