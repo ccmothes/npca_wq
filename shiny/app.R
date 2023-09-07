@@ -179,12 +179,12 @@ server <- function(input, output, session) {
   })
   
   #  generarte the map object 
-  output$map1 <- leaflet::renderLeaflet({
-    leaflet(options = leafletOptions(minZoom = 4)) %>%
-      setView(lng = -105.07592352501446, 
-              lat = 40.59085658003177, 
-              zoom = 7) %>%
-      addProviderTiles("CartoDB.Positron", group = "CartoDB.Positron") #%>%
+  # output$map1 <- leaflet::renderLeaflet({
+  #   leaflet(options = leafletOptions(minZoom = 4)) %>%
+  #     setView(lng = -105.07592352501446, 
+  #             lat = 40.59085658003177, 
+  #             zoom = 7) %>%
+  #     addProviderTiles("CartoDB.Positron", group = "CartoDB.Positron") #%>%
     # addLayersControl(
     #   # baseGroups = c("OpenStreetMap", "Light"),
     #   overlayGroups = c(
@@ -193,7 +193,7 @@ server <- function(input, output, session) {
     #   position = "topleft",
     #   options = layersControlOptions(collapsed = TRUE)
     # )
-  })
+  # })
   
   #  generarte the map object 
   output$map1 <- leaflet::renderLeaflet({
@@ -678,6 +678,107 @@ server <- function(input, output, session) {
         selectRows(1)
       
     }
+  })
+  
+  # highlight map feature from table selection
+  observeEvent(input$table_rows_selected, {
+    print(input$table_rows_selected)
+    
+    selected_id <- isolate(filtered_data() %>% dplyr::slice(input$table_rows_selected))
+    print(selected_id)
+    
+    # add selected attains feature based on
+    if(selected_id$Type == "Line") {
+      
+      selected_feature <- liner() %>% filter(assessmentunitidentifier == selected_id$Assessment_Code)
+      
+      bounds <- selected_feature %>% 
+        st_bbox() %>% 
+        as.character()
+      
+      leafletProxy("map2") %>% 
+        clearGroup("A") %>% 
+        addPolylines(
+          data = selected_feature,
+          fillColor = "red",
+          group = "A",
+          fillOpacity = 0.8,
+          color = "red",
+          weight = 4.5,
+          popup = paste0("Status: ", selected_feature$Assessment_Category,
+                         "<br>",
+                         "State ID: ", selected_feature$assessmentunitidentifier,
+                         "<br>",
+                         "Impairments: ", selected_feature$Impairments,
+                         "<br>",
+                         "URL: ", selected_feature$Link)) %>% 
+        fitBounds(bounds[1], bounds[2], bounds[3], bounds[4])
+
+        
+      
+    }
+    
+    if(selected_id$Type == "Area") {
+      
+      selected_feature <- areaer() %>% filter(assessmentunitidentifier == selected_id$Assessment_Code)
+      
+      bounds <- selected_feature %>% 
+        st_bbox() %>% 
+        as.character()
+      
+      leafletProxy("map2") %>% 
+        clearGroup("A") %>% 
+        addPolylines(
+          data = selected_feature,
+          fillColor = "red",
+          group = "A",
+          fillOpacity = 0.8,
+          color = "red",
+          weight = 4.5,
+          popup = paste0("Status: ", selected_feature$Assessment_Category,
+                         "<br>",
+                         "State ID: ", selected_feature$assessmentunitidentifier,
+                         "<br>",
+                         "Impairments: ", selected_feature$Impairments,
+                         "<br>",
+                         "URL: ", selected_feature$Link)) %>% 
+        fitBounds(bounds[1], bounds[2], bounds[3], bounds[4])
+      
+      
+      
+    }
+    
+    if(selected_id$Type == "Point") {
+      
+      selected_feature <- pointer() %>% filter(assessmentunitidentifier == selected_id$Assessment_Code)
+      
+      bounds <- selected_feature %>% 
+        st_bbox() %>% 
+        as.character()
+      
+      leafletProxy("map2") %>% 
+        clearGroup("A") %>% 
+        addPolylines(
+          data = selected_feature,
+          fillColor = "red",
+          group = "A",
+          fillOpacity = 0.8,
+          color = "red",
+          weight = 4.5,
+          popup = paste0("Status: ", selected_feature$Assessment_Category,
+                         "<br>",
+                         "State ID: ", selected_feature$assessmentunitidentifier,
+                         "<br>",
+                         "Impairments: ", selected_feature$Impairments,
+                         "<br>",
+                         "URL: ", selected_feature$Link)) %>% 
+        fitBounds(bounds[1], bounds[2], bounds[3], bounds[4])
+      
+      
+      
+    }
+  
+    
   })
   
   
