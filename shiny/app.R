@@ -520,7 +520,7 @@ server <- function(input, output, session) {
                        "<br>",
                        "URL: ", areaer()$Link),
         highlightOptions = highlightOptions(
-          color = "yellow",
+          color = "#fc03ec",
           opacity = 1,
           weight = 3,
           bringToFront = TRUE
@@ -552,7 +552,7 @@ server <- function(input, output, session) {
                        "<br>",
                        "URL: ", liner()$Link),
         highlightOptions = highlightOptions(
-          color = "yellow",
+          color = "#fc03ec",
           opacity = 1,
           weight = 3,
           bringToFront = TRUE
@@ -572,7 +572,7 @@ server <- function(input, output, session) {
                        "<br>",
                        "URL: ", pointer()$Link),
         highlightOptions = highlightOptions(
-          color = "yellow",
+          color = "#fc03ec",
           opacity = 1,
           weight = 3,
           bringToFront = TRUE
@@ -664,28 +664,28 @@ server <- function(input, output, session) {
   ))
   
   # Table proxy for highlighting and sorting map selection
-  observeEvent(input$map2_shape_click, {
-    
-    if(!is.null(input$map2_shape_click$id)) {
-      # get selected row
-      selected_row <- which(filtered_data()$Assessment_Code %in% input$map2_shape_click$id)
-      
-      # calculate new row order
-      row_order <- c(selected_row:nrow(filtered_data()), 1:(selected_row - 1))
-      
-      DT::dataTableProxy("table") %>%
-        replaceData(filtered_data()[row_order,]) %>% 
-        selectRows(1)
-      
-    }
-  })
+  # observeEvent(input$map2_shape_click, {
+  #   
+  #   if(!is.null(input$map2_shape_click$id)) {
+  #     # get selected row
+  #     selected_row <- which(filtered_data()$Assessment_Code %in% input$map2_shape_click$id)
+  #     
+  #     # calculate new row order
+  #     row_order <- c(selected_row:nrow(filtered_data()), 1:(selected_row - 1))
+  #     
+  #     DT::dataTableProxy("table") %>%
+  #       replaceData(filtered_data()[row_order,]) %>% 
+  #       selectRows(1)
+  #     
+  #   }
+  # })
   
   # highlight map feature from table selection
   observeEvent(input$table_rows_selected, {
     print(input$table_rows_selected)
     
     selected_id <- isolate(filtered_data() %>% dplyr::slice(input$table_rows_selected))
-    print(selected_id)
+    #print(selected_id)
     
     # add selected attains feature based on
     if(selected_id$Type == "Line") {
@@ -700,10 +700,10 @@ server <- function(input, output, session) {
         clearGroup("A") %>% 
         addPolylines(
           data = selected_feature,
-          fillColor = "red",
+          fillColor = "#fc03ec",
           group = "A",
-          fillOpacity = 0.8,
-          color = "red",
+          fillOpacity = 1,
+          color = "#fc03ec",
           weight = 4.5,
           popup = paste0("Status: ", selected_feature$Assessment_Category,
                          "<br>",
@@ -730,10 +730,10 @@ server <- function(input, output, session) {
         clearGroup("A") %>% 
         addPolylines(
           data = selected_feature,
-          fillColor = "red",
+          fillColor = "#fc03ec",
           group = "A",
-          fillOpacity = 0.8,
-          color = "red",
+          fillOpacity = 1,
+          color = "#fc03ec",
           weight = 4.5,
           popup = paste0("Status: ", selected_feature$Assessment_Category,
                          "<br>",
@@ -760,10 +760,10 @@ server <- function(input, output, session) {
         clearGroup("A") %>% 
         addPolylines(
           data = selected_feature,
-          fillColor = "red",
+          fillColor = "#fc03ec",
           group = "A",
-          fillOpacity = 0.8,
-          color = "red",
+          fillOpacity = 1,
+          color = "#fc03ec",
           weight = 4.5,
           popup = paste0("Status: ", selected_feature$Assessment_Category,
                          "<br>",
