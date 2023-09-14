@@ -682,8 +682,7 @@ server <- function(input, output, session) {
   
   # highlight map feature from table selection
   observeEvent(input$table_rows_selected, {
-    print(input$table_rows_selected)
-    
+
     selected_id <- isolate(filtered_data() %>% dplyr::slice(input$table_rows_selected))
     #print(selected_id)
     
