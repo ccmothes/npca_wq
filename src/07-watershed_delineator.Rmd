@@ -41,21 +41,71 @@ park_lines <- park_boundaries %>%
 nhd_flowlines <- sf::st_read(dsn = 'data/in/NHDPlusV21_National_Seamless_Flattened_Lower48.gdb',
                              layer = "NHDFlowline_Network") 
 
+park_list <- park_lines %>%
+  .$UNIT_CODE
+
+park_aoi <- park_boundaries %>%
+  filter(!UNIT_CODE %in% no_water$UNIT_CODE) 
+
+downstream_finder <- function(park){
+  
+  #park = "YELL"
+  
+  aoi <- filter(park_aoi, UNIT_CODE == park) 
+  
+  # download flowlines for entire aoi
+  try(nhd_flowlines <- nhdplusTools::get_nhdplus(AOI = aoi, 
+                                                 realization='flowline'))
+  
+  # add `tocomid` field to ID flowlines that cross over the aoi
+  # this step massively speeds up run time by reducing the number
+  # of watersheds that need to be created
+  try(park_flowlines <- nhd_flowlines  %>%
+        dplyr::select(-id) %>%
+        dplyr::distinct(comid, .keep_all=TRUE) %>%
+        nhdplusTools::get_tocomid(., add=TRUE))
+  
+  outsiders <- tibble(UNIT_CODE = park,
+                      comid = NA)
+  
+  # minimize number of origin points by selecting only those that cross park boundary
+  try(
+    outsiders <- park_flowlines %>%
+      # to comid means there are no additional downstream flowlines:
+      filter(tocomid==0) %>%
+      dplyr::select(comid) %>%
+      mutate(UNIT_CODE = park)
+  )
+  
+  print(paste0(park, " done"))
+  
+  return(outsiders)
+  
+}
+
+# identifies flowlines that are DOWNSTREAM of the park (therefore we don't want to perform an upstream trace of them)
+downstream_comids <- park_lines$UNIT_CODE %>%
+  map(~downstream_finder(.)) %>%
+  bind_rows() %>%
+  mutate(BAD = "baddie")
+saveRDS(downstream_comids, 'data/mid/downstream_flowline_list.RDS')
+
 lines_crossing_parks <- st_intersection(st_zm(nhd_flowlines), st_zm(park_lines))
 
 lines_crossing_parks <- nhd_flowlines %>%
   st_zm() %>%
-  filter(COMID %in% read_csv('data/bad/nhd_park_crossover.csv')$COMID) %>%
+  #filter(!COMID %in% read_csv('data/bad/nhd_park_crossover.csv')$COMID) %>%
+  # no flowlines 
+  #filter(!COMID %in% downstream_comids$comid) %>%
   st_join(., st_zm(park_boundaries), left = TRUE) %>%
+  #no coasts
   filter(FCODE != 56600) %>%
   select(COMID, UNIT_NAME, UNIT_CODE)
-
-park_list <- park_lines %>%
-  .$UNIT_CODE
 
 for(i in 1:length(park_list)){
   
   park_subset_sites <- lines_crossing_parks %>%
+    data.table() %>%
     dplyr::filter(UNIT_CODE == park_list[i]) %>%
     distinct(COMID, .keep_all = TRUE) %>%
     .$COMID
@@ -98,29 +148,33 @@ for(i in 1:length(park_list)){
 short <- str_sub(list.files('data/mid/ws_comids_50km/', full.names = FALSE) , start = 1, end = 4)
 
 contus_catchments <- readRDS('data/mid/nhdplus_contus_catchments_3857.RDS') %>%
-  rowid_to_column()
+  rowid_to_column() %>%
+  st_transform(4269)
 
 for(i in 1:length(short)){
   shorty <- read_csv(paste0('data/mid/ws_comids_50km/', short[i], '.csv'))
- try(contus_catchments %>%
-    dplyr::filter(FEATUREID %in% shorty$comid) %>%
-    summarize() %>%
-    nngeo::st_remove_holes() %>%
-    dplyr::mutate(UNIT_CODE = short[i]) %>%
-    saveRDS(paste0('data/mid/ws_shapes_50km/', short[i], '.RDS')))
+  try(test <- contus_catchments %>%
+        dplyr::filter(FEATUREID %in% shorty$comid) %>%
+        dplyr::mutate(UNIT_CODE = short[i]) %>%
+        # left_join(data.table(downstream_comids), by = c(c("FEATUREID"="comid"), "UNIT_CODE")) %>%
+        # filter(is.na(BAD)) %>%
+        summarize() %>%
+        nngeo::st_remove_holes() %>%
+        dplyr::mutate(UNIT_CODE = short[i]) %>%
+        saveRDS(paste0('data/mid/ws_shapes_50km/', short[i], '.RDS')))
   print(paste0(short[i], " watershed saved!"))
 }
+
+###
 
 # join all watersheds together:
 summed <- list.files('data/mid/ws_shapes_50km/', full.names = TRUE) %>%
   map(~readRDS(.)) %>%
   bind_rows() %>%
-  # why is this not working... >:(
-  #sf::st_difference(., park_boundaries) %>%
-  left_join(park_table, by = "UNIT_CODE")
-saveRDS(summed,'data/mid/all_nps_watersheds_50km.RDS'
-        )
-st_write(summed, 'data/bad/all_nps_watersheds_50km.shp')
+  sf::st_difference(., park_boundaries) %>%
+  left_join(park_table, by = "UNIT_CODE") %>%
+  st_transform(3857)
+saveRDS(summed,'data/mid/all_nps_watersheds_50km.RDS')
 
 mini <- summed %>% 
   sf::st_simplify(dTolerance = 0.001) %>%
@@ -153,11 +207,12 @@ attains_points <- readRDS('data/mid/attains_au_points_.RDS')
 # Load in ATTAINS water quality standard parameter data:
 attains_assmnt_parms <- readRDS("data/mid/attains_au_assmnt_parms.RDS")
 
-raw_ws <- list.files('data/mid/park_ws_shapes_50km/', full.names = TRUE) 
+raw_ws <- summed$UNIT_CODE#list.files('data/mid/park_ws_shapes_50km/', full.names = TRUE) 
 
 data_puller <- function(raw_ws, layer){
   
-  ws <- readRDS(raw_ws) %>%
+  ws <- summed %>%
+    filter(UNIT_CODE == raw_ws) %>%
     dplyr::select(UNIT_CODE) %>%
     st_make_valid() 
   
@@ -391,9 +446,7 @@ park_ws_points <- bind_rows(park_point_impaired, park_point_good, park_point_unk
   filter(!Park %in% no_water$UNIT_NAME)
 saveRDS(park_ws_points, 'shiny/data/ws_points.RDS')
 
-all_the_watersheds <-  list.files('data/mid/park_outside/', full.names = TRUE) %>%
-  map(~readRDS(.)) %>%
-  bind_rows() %>%
+all_the_watersheds <-  summed %>%
   st_transform(4269) %>%
   #st_cast("POLYLINE") %>%
   filter(!UNIT_NAME %in% no_water$UNIT_NAME) %>%

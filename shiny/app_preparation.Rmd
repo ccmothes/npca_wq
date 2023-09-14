@@ -100,7 +100,7 @@ flowlines <- readRDS('data/mid/nhdhr_park_flow.RDS') %>%
   group_by(UNIT_CODE) %>%
   summarize() %>%
   left_join(park_table, by = "UNIT_CODE") %>%
-  #sf::st_simplify(dTolerance = 10) %>%
+  sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326) %>%
   dplyr::select(UNIT_NAME, STATE)
 saveRDS(flowlines, 'shiny/data/map_flowlines.RDS')
@@ -108,14 +108,14 @@ areas <- readRDS('data/mid/nhdhr_park_area.RDS') %>%
   group_by(UNIT_CODE) %>%
   summarize() %>%
   left_join(park_table, by = "UNIT_CODE") %>%
-  #sf::st_simplify(dTolerance = 10) %>%
+  sf::st_simplify(dTolerance = 10) %>%
   st_transform(4326) %>%
   select(UNIT_NAME, STATE)
 saveRDS(areas, 'shiny/data/map_areas.RDS')
 waterbodies <- readRDS('data/mid/nhdhr_park_waterbody.RDS') %>%
   group_by(UNIT_CODE) %>%
   summarize() %>%
-  #sf::st_simplify(dTolerance = 10) %>%
+  sf::st_simplify(dTolerance = 10) %>%
   left_join(park_table, by = "UNIT_CODE") %>% 
   st_transform(4326) %>%
   select(UNIT_NAME, STATE)
@@ -216,13 +216,12 @@ for_app_update <- for_app %>%
   select(Assessment_Category, Park, nhdplusid, Impairments, catchment_area, col) %>%
   data.table() %>%
   distinct(.keep_all = TRUE) %>%
-  st_as_sf()
-  #sf::st_simplify(dTolerance = 0.0001) #%>%
-  # a very strange thing happens in Acadia - I think due to all the islands/combos of catchments and coastal pseudo catchments.
-  # mutate(Assessment_Category = ifelse(Park == "Acadia National Park" & Assessment_Category== "Impaired" & is.na(nhdplusid), "Good", Assessment_Category)) %>%
-  # mutate(Impairments = ifelse(Park == "Acadia National Park" & Assessment_Category == "Good" & is.na(nhdplusid), "None", Impairments))
-  #   mutate(col = ifelse(Park == "Acadia National Park" & Assessment_Category == "Good" & is.na(nhdplusid), "#059FA4", col))
-
+    # a very strange thing happens in Acadia - I think due to all the islands/combos of catchments and coastal pseudo catchments.
+  mutate(Assessment_Category = ifelse(Park == "Acadia National Park" & Assessment_Category == "Impaired" & is.na(nhdplusid), "Good", Assessment_Category)) %>%
+  mutate(Impairments = ifelse(Park == "Acadia National Park" & Assessment_Category == "Good" & is.na(nhdplusid), "None", Impairments)) %>%
+  mutate(col = ifelse(Park == "Acadia National Park" & Assessment_Category == "Good" & is.na(nhdplusid), "#059FA4", col)) %>%
+  st_as_sf() %>%
+  sf::st_simplify(dTolerance = 0.0001)
 saveRDS(for_app_update, 'shiny/data/catch.RDS')
 ```
 
