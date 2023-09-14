@@ -118,7 +118,12 @@ ui <- navbarPage("National Park Service Water Quality",
               br(),
               fluidRow(class = "table",
                        # Table
-                       dataTableOutput("table"))))
+                       dataTableOutput("table")))),
+              
+              # add Centroid credits
+              tags$footer(includeHTML("www/footer.html")),
+              tags$style(type = "text/css",
+                         ".footer-container {text-align: center; padding-top: 3%;padding-bottpm: 1%; opacity: 0.6;}")
               
               
               
