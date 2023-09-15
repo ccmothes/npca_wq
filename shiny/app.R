@@ -118,7 +118,12 @@ ui <- navbarPage("National Park Service Water Quality",
               br(),
               fluidRow(class = "table",
                        # Table
-                       dataTableOutput("table"))))
+                       dataTableOutput("table")))),
+              
+              # add Centroid credits
+              tags$footer(includeHTML("www/footer.html")),
+              tags$style(type = "text/css",
+                         ".footer-container {text-align: center; padding-top: 3%;padding-bottpm: 1%; opacity: 0.6;}")
               
               
               
@@ -682,8 +687,7 @@ server <- function(input, output, session) {
   
   # highlight map feature from table selection
   observeEvent(input$table_rows_selected, {
-    print(input$table_rows_selected)
-    
+
     selected_id <- isolate(filtered_data() %>% dplyr::slice(input$table_rows_selected))
     #print(selected_id)
     
@@ -698,6 +702,7 @@ server <- function(input, output, session) {
       
       leafletProxy("map2") %>% 
         clearGroup("A") %>% 
+        # addMapPane(name = "selected", zIndex = 420) %>% 
         addPolylines(
           data = selected_feature,
           fillColor = "#fc03ec",
@@ -705,6 +710,7 @@ server <- function(input, output, session) {
           fillOpacity = 1,
           color = "#fc03ec",
           weight = 4.5,
+          # options = pathOptions(pane = "selected"),
           popup = paste0("Status: ", selected_feature$Assessment_Category,
                          "<br>",
                          "State ID: ", selected_feature$assessmentunitidentifier,
